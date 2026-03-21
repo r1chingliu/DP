@@ -30,6 +30,25 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
+app.post('/api/lineup/suggest', async (req, res) => {
+  try {
+    if (!DASHSCOPE_API_KEY) {
+      return res.status(500).json({ detail: 'DASHSCOPE_API_KEY is not configured' });
+    }
+
+    const players = Array.isArray(req.body?.players) ? req.body.players : [];
+    if (!players.length) {
+      return res.status(400).json({ detail: 'players is required' });
+    }
+
+    const suggestion = await suggestLineup(players);
+    return res.json(suggestion);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'Lineup suggestion failed';
+    return res.status(502).json({ detail });
+  }
+});
+
 app.post('/api/ocr/extract', upload.single('file'), async (req, res) => {
   try {
     if (!DASHSCOPE_API_KEY) {
@@ -68,7 +87,7 @@ app.listen(PORT, '127.0.0.1', () => {
 
 async function getOcrWorker() {
   if (!ocrWorkerPromise) {
-    ocrWorkerPromise = createWorker('chi_sim+eng');
+    ocrWorkerPromise = createWorker(['chi_sim', 'eng']);
   }
   return ocrWorkerPromise;
 }
@@ -184,4 +203,63 @@ function normalizeConfidence(value) {
     return 0;
   }
   return Math.max(0, Math.min(1, parsed));
+}
+
+async function suggestLineup(players) {
+  const prompt = `
+你是一个把股票和 ETF 组合映射成足球阵容的助手。
+
+输入是一组持仓，请你给出：
+1. formationName：推荐阵型，例如 4-3-3、4-2-3-1
+2. summary：2 到 4 句中文点评，只讨论组合结构，不给投资建议
+3. playerNotes：数组，每个元素包含 playerId 和 note，note 要说明该标的在阵容里的角色
+
+只返回 JSON，结构必须是：
+{
+  "formationName": "4-3-3",
+  "summary": "中文点评",
+  "playerNotes": [
+    {
+      "playerId": "xxx",
+      "note": "中文角色说明"
+    }
+  ]
+}
+
+持仓数据如下：
+${JSON.stringify(players)}
+`;
+
+  const response = await fetch(`${DASHSCOPE_BASE_URL.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${DASHSCOPE_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: DASHSCOPE_TEXT_MODEL,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.3,
+    }),
+  });
+
+  const responseText = await response.text();
+  if (!response.ok) {
+    throw new Error(`DashScope request failed: ${responseText}`);
+  }
+
+  const payload = JSON.parse(responseText);
+  const text = extractMessageText(payload);
+  const parsed = extractJsonObject(text);
+
+  return {
+    formationName: stringify(parsed.formationName) || '4-3-3',
+    summary: stringify(parsed.summary),
+    playerNotes: Array.isArray(parsed.playerNotes)
+      ? parsed.playerNotes.map((item) => ({
+          playerId: stringify(item.playerId),
+          note: stringify(item.note),
+        }))
+      : [],
+  };
 }

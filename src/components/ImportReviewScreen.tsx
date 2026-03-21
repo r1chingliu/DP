@@ -1,5 +1,5 @@
-import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useMemo } from 'react';
+import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { ExtractedHoldingRow, OcrExtractionResult } from '../types/portfolio';
 
@@ -26,13 +26,15 @@ export function ImportReviewScreen({
   return (
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.header}>
-        <Pressable onPress={onBack}>
-          <Text style={styles.backLink}>返回阵容</Text>
-        </Pressable>
-        <Text style={styles.kicker}>OCR Review</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.kicker}>OCR Review</Text>
+          <Pressable onPress={onBack}>
+            <Text style={styles.backLink}>关闭</Text>
+          </Pressable>
+        </View>
         <Text style={styles.title}>识别确认页</Text>
         <Text style={styles.subtitle}>
-          当前结果来自真实 OCR 后端，这里作为人工校验层，避免错误持仓直接入库。
+          这里是人工校验层。小数点、符号和个别字段看起来不对时，先在这里改正再导入。
         </Text>
       </View>
 
@@ -65,7 +67,7 @@ export function ImportReviewScreen({
         {extraction.rows.map((row) => (
           <View key={row.id} style={styles.rowCard}>
             <View style={styles.rowHeader}>
-              <Text style={styles.rowTitle}>{row.name}</Text>
+              <Text style={styles.rowTitle}>{row.name || '未识别名称'}</Text>
               <ConfidenceBadge confidence={row.confidence} />
             </View>
             <EditableField label="持仓名称" value={row.name} onChangeText={(value) => onUpdateRow(row.id, { name: value })} />
@@ -97,8 +99,14 @@ export function ImportReviewScreen({
         ))}
       </View>
 
-      <Pressable style={[styles.confirmButton, isSubmitting && styles.confirmButtonDisabled]} onPress={onConfirm} disabled={isSubmitting}>
-        <Text style={styles.confirmButtonText}>{isSubmitting ? '正在导入...' : '确认导入并重建阵容'}</Text>
+      <Pressable
+        style={[styles.confirmButton, isSubmitting && styles.confirmButtonDisabled]}
+        onPress={onConfirm}
+        disabled={isSubmitting}
+      >
+        <Text style={styles.confirmButtonText}>
+          {isSubmitting ? '正在导入...' : '确认导入并重建阵容'}
+        </Text>
       </Pressable>
     </ScrollView>
   );
@@ -146,10 +154,14 @@ const styles = StyleSheet.create({
     paddingTop: 18,
     paddingBottom: 36,
     gap: 18,
-    backgroundColor: '#08141f',
   },
   header: {
     gap: 8,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   backLink: {
     color: '#8bd0a7',
@@ -165,7 +177,7 @@ const styles = StyleSheet.create({
   },
   title: {
     color: '#f5f8f9',
-    fontSize: 32,
+    fontSize: 30,
     fontWeight: '800',
   },
   subtitle: {

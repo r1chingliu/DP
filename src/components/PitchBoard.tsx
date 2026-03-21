@@ -1,10 +1,12 @@
 import { useMemo, useRef, useState } from 'react';
 import {
+  PanResponder,
   StyleSheet,
   Text,
   View,
   type GestureResponderEvent,
   type LayoutChangeEvent,
+  type PanResponderGestureState,
 } from 'react-native';
 
 import type { LineupState, PitchSlot, PortfolioPlayer } from '../types/portfolio';
@@ -31,6 +33,9 @@ type PitchBounds = {
   width: number;
   height: number;
 };
+
+const CARD_WIDTH = 110;
+const CARD_HEIGHT = 72;
 
 export function PitchBoard({
   lineup,
@@ -73,13 +78,12 @@ export function PitchBoard({
   };
 
   const handleDragStart = (slotId: string, player: PortfolioPlayer, pageX: number, pageY: number) => {
-    const targetSlotId = findNearestSlotId(pageX, pageY);
     setDragState({
       sourceSlotId: slotId,
       player,
       pageX,
       pageY,
-      targetSlotId,
+      targetSlotId: findNearestSlotId(pageX, pageY),
     });
   };
 
@@ -114,8 +118,8 @@ export function PitchBoard({
   const dragCardStyle =
     dragState && pitchBounds
       ? {
-          left: dragState.pageX - pitchBounds.x - 55,
-          top: dragState.pageY - pitchBounds.y - 36,
+          left: dragState.pageX - pitchBounds.x - CARD_WIDTH / 2,
+          top: dragState.pageY - pitchBounds.y - CARD_HEIGHT / 2,
         }
       : null;
 
@@ -176,7 +180,7 @@ export function PitchBoard({
         ) : null}
       </View>
 
-      <Text style={styles.tip}>长按首发球员后拖动，松手会吸附到最近位置并与目标球员换位。</Text>
+      <Text style={styles.tip}>长按后持续拖动，松手会吸附到最近位置并与目标球员换位。</Text>
     </View>
   );
 }
@@ -215,7 +219,7 @@ function DraggableSlotCard({
     }
   };
 
-  const handleGrant = (event: GestureResponderEvent) => {
+  const startDrag = (event: GestureResponderEvent) => {
     if (!player || locked) {
       return;
     }
@@ -230,7 +234,7 @@ function DraggableSlotCard({
     }, 220);
   };
 
-  const handleMove = (event: GestureResponderEvent) => {
+  const updateDrag = (event: GestureResponderEvent, gestureState: PanResponderGestureState) => {
     if (!player || locked) {
       return;
     }
@@ -242,8 +246,8 @@ function DraggableSlotCard({
     }
 
     if (!dragEnabledRef.current) {
-      const distance = Math.hypot(pageX - start.pageX, pageY - start.pageY);
-      if (distance > 8) {
+      const distance = Math.hypot(gestureState.dx, gestureState.dy);
+      if (distance > 12) {
         clearTimer();
       }
       return;
@@ -252,7 +256,7 @@ function DraggableSlotCard({
     onDragMove(pageX, pageY);
   };
 
-  const handleRelease = (event: GestureResponderEvent) => {
+  const finishDrag = (event: GestureResponderEvent) => {
     const { pageX, pageY } = event.nativeEvent;
 
     if (dragEnabledRef.current) {
@@ -266,20 +270,30 @@ function DraggableSlotCard({
     gestureStartRef.current = null;
   };
 
-  const handleTerminate = () => {
+  const cancelDrag = () => {
     clearTimer();
     dragEnabledRef.current = false;
     gestureStartRef.current = null;
   };
 
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => Boolean(player),
+        onMoveShouldSetPanResponder: () => Boolean(player),
+        onMoveShouldSetPanResponderCapture: () => Boolean(player),
+        onPanResponderGrant: startDrag,
+        onPanResponderMove: updateDrag,
+        onPanResponderRelease: finishDrag,
+        onPanResponderTerminate: cancelDrag,
+        onPanResponderTerminationRequest: () => false,
+      }),
+    [player, locked, slot.id],
+  );
+
   return (
     <View
-      onStartShouldSetResponder={() => Boolean(player)}
-      onMoveShouldSetResponder={() => Boolean(player)}
-      onResponderGrant={handleGrant}
-      onResponderMove={handleMove}
-      onResponderRelease={handleRelease}
-      onResponderTerminate={handleTerminate}
+      {...panResponder.panHandlers}
       style={[
         styles.slotButton,
         locked && styles.lockedSlot,
@@ -360,14 +374,14 @@ const styles = StyleSheet.create({
   },
   slotWrap: {
     position: 'absolute',
-    width: 110,
-    marginLeft: -55,
-    marginTop: -36,
+    width: CARD_WIDTH,
+    marginLeft: -CARD_WIDTH / 2,
+    marginTop: -CARD_HEIGHT / 2,
   },
   slotButton: {
     backgroundColor: 'rgba(8, 20, 31, 0.82)',
     borderRadius: 18,
-    minHeight: 72,
+    minHeight: CARD_HEIGHT,
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderWidth: 1,
@@ -386,8 +400,8 @@ const styles = StyleSheet.create({
   },
   dragCard: {
     position: 'absolute',
-    width: 110,
-    minHeight: 72,
+    width: CARD_WIDTH,
+    minHeight: CARD_HEIGHT,
     backgroundColor: '#0d2330',
     borderRadius: 18,
     paddingHorizontal: 10,

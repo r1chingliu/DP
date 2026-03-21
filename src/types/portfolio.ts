@@ -63,3 +63,12 @@ export type OcrExtractionResult = {
   rows: ExtractedHoldingRow[];
   rawText?: string;
 };
+
+export type AiLineupSuggestion = {
+  formationName: string;
+  summary: string;
+  playerNotes: Array<{
+    playerId: string;
+    note: string;
+  }>;
+};

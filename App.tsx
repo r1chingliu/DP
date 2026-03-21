@@ -18,26 +18,44 @@ import { PitchBoard } from './src/components/PitchBoard';
 import { PortfolioSummary } from './src/components/PortfolioSummary';
 import { StarCardModal } from './src/components/StarCardModal';
 import { mockPortfolio } from './src/data/mockPortfolio';
-import { buildRecommendedLineup, createInitialAssignments, getBenchPlayers, getLineupPlayer, getPitchSlots, movePlayerBetweenTargets, toggleSlotLock } from './src/lib/lineup';
+import {
+  buildRecommendedLineup,
+  createInitialAssignments,
+  getBenchPlayers,
+  getLineupPlayer,
+  getPitchSlots,
+  movePlayerBetweenTargets,
+  toggleSlotLock,
+} from './src/lib/lineup';
 import { buildPlayersFromExtraction } from './src/lib/portfolio';
 import { extractPortfolioFromBackend } from './src/services/backend';
-import type { ExtractedHoldingRow, OcrExtractionResult, PortfolioPlayer } from './src/types/portfolio';
-
-type ScreenMode = 'lineup' | 'review';
+import { requestAiLineupSuggestion } from './src/services/lineup';
+import type {
+  AiLineupSuggestion,
+  ExtractedHoldingRow,
+  OcrExtractionResult,
+  PortfolioPlayer,
+} from './src/types/portfolio';
 
 export default function App() {
   const [players, setPlayers] = useState(mockPortfolio.players);
   const [updatedAt, setUpdatedAt] = useState(mockPortfolio.updatedAt);
-  const [lineup, setLineup] = useState(() => createInitialAssignments(buildRecommendedLineup(mockPortfolio.players)));
+  const [lineup, setLineup] = useState(() =>
+    createInitialAssignments(buildRecommendedLineup(mockPortfolio.players)),
+  );
   const [selectedPlayer, setSelectedPlayer] = useState<PortfolioPlayer | null>(null);
-  const [screenMode, setScreenMode] = useState<ScreenMode>('lineup');
   const [isImporting, setIsImporting] = useState(false);
   const [isSubmittingImport, setIsSubmittingImport] = useState(false);
+  const [isRequestingAi, setIsRequestingAi] = useState(false);
   const [extraction, setExtraction] = useState<OcrExtractionResult | null>(null);
+  const [aiSuggestion, setAiSuggestion] = useState<AiLineupSuggestion | null>(null);
 
   const pitchSlots = useMemo(() => getPitchSlots(), []);
   const benchPlayers = useMemo(() => getBenchPlayers(players, lineup), [lineup, players]);
-  const totalMarketValue = useMemo(() => players.reduce((sum, player) => sum + player.marketValue, 0), [players]);
+  const totalMarketValue = useMemo(
+    () => players.reduce((sum, player) => sum + player.marketValue, 0),
+    [players],
+  );
 
   const handleOpenPlayer = (playerId: string | null) => {
     if (!playerId) {
@@ -47,8 +65,18 @@ export default function App() {
     setSelectedPlayer(player);
   };
 
-  const handleAutoLineup = () => {
-    setLineup(createInitialAssignments(buildRecommendedLineup(players)));
+  const handleAutoLineup = async () => {
+    try {
+      setIsRequestingAi(true);
+      const suggestion = await requestAiLineupSuggestion(players);
+      setAiSuggestion(suggestion);
+      setLineup(createInitialAssignments(buildRecommendedLineup(players)));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'AI 排阵请求失败，请稍后重试。';
+      Alert.alert('AI 排阵失败', message);
+    } finally {
+      setIsRequestingAi(false);
+    }
   };
 
   const handleToggleLock = (slotId: string) => {
@@ -76,7 +104,6 @@ export default function App() {
 
       const nextExtraction = await extractPortfolioFromBackend(result.assets[0]);
       setExtraction(nextExtraction);
-      setScreenMode('review');
     } catch (error) {
       const message = error instanceof Error ? error.message : '截图导入流程执行失败，请稍后重试。';
       Alert.alert('导入失败', message);
@@ -106,28 +133,10 @@ export default function App() {
     setPlayers(importedPlayers);
     setUpdatedAt(extraction.extractedAt);
     setLineup(createInitialAssignments(buildRecommendedLineup(importedPlayers)));
-    setScreenMode('lineup');
     setExtraction(null);
+    setAiSuggestion(null);
     setIsSubmittingImport(false);
   };
-
-  if (screenMode === 'review' && extraction) {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <StatusBar style="light" />
-        <ImportReviewScreen
-          extraction={extraction}
-          isSubmitting={isSubmittingImport}
-          onBack={() => {
-            setScreenMode('lineup');
-            setExtraction(null);
-          }}
-          onConfirm={handleConfirmImport}
-          onUpdateRow={handleUpdateRow}
-        />
-      </SafeAreaView>
-    );
-  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -138,25 +147,50 @@ export default function App() {
             <Text style={styles.kicker}>Lineup Portfolio</Text>
             <Text style={styles.title}>阵容持仓</Text>
             <Text style={styles.subtitle}>
-              用足球阵型管理股票和 ETF。当前版本已经支持导入截图、确认字段和自动重建阵容。
+              用足球阵型管理股票和 ETF。当前版本支持截图导入、字段确认、拖拽换位和 AI 阵容点评。
             </Text>
           </View>
           <View style={styles.actionRow}>
-            <Pressable style={styles.secondaryButton} onPress={handleImportScreenshot} disabled={isImporting}>
-              <Text style={styles.secondaryButtonText}>{isImporting ? '识别中...' : '导入截图'}</Text>
+            <Pressable
+              style={styles.secondaryButton}
+              onPress={handleImportScreenshot}
+              disabled={isImporting}
+            >
+              <Text style={styles.secondaryButtonText}>
+                {isImporting ? '识别中...' : '导入截图'}
+              </Text>
             </Pressable>
-            <Pressable style={styles.aiButton} onPress={handleAutoLineup}>
-              <Text style={styles.aiButtonText}>AI 重新排阵</Text>
+            <Pressable
+              style={styles.aiButton}
+              onPress={handleAutoLineup}
+              disabled={isRequestingAi}
+            >
+              <Text style={styles.aiButtonText}>
+                {isRequestingAi ? 'AI 思考中...' : 'AI 重新排阵'}
+              </Text>
             </Pressable>
           </View>
         </View>
 
-        <PortfolioSummary players={players} totalMarketValue={totalMarketValue} formationName={lineup.formationName} updatedAt={updatedAt} />
+        <PortfolioSummary
+          players={players}
+          totalMarketValue={totalMarketValue}
+          formationName={aiSuggestion?.formationName || lineup.formationName}
+          updatedAt={updatedAt}
+        />
+
+        {aiSuggestion ? (
+          <View style={styles.aiCard}>
+            <Text style={styles.aiTitle}>AI 阵容点评</Text>
+            <Text style={styles.aiMeta}>建议阵型：{aiSuggestion.formationName}</Text>
+            <Text style={styles.aiSummary}>{aiSuggestion.summary}</Text>
+          </View>
+        ) : null}
 
         <View style={styles.hintCard}>
           <Text style={styles.hintLabel}>当前操作</Text>
           <Text style={styles.hintText}>
-            轻点卡片进入详情，长按首发球员后拖到另一个位置，松手即可自动换位。导入截图后会进入 OCR 确认页。
+            轻点卡片进入详情，长按首发球员后持续拖动，松手即可自动换位。导入截图后会弹出识别结果小界面。
           </Text>
         </View>
 
@@ -176,14 +210,10 @@ export default function App() {
           getPlayer={(playerId) => getLineupPlayer(players, playerId)}
         />
 
-        <BenchStrip benchPlayers={benchPlayers} onOpenPlayer={(playerId) => handleOpenPlayer(playerId)} />
-
-        <View style={styles.footerCard}>
-          <Text style={styles.footerTitle}>当前开发重点</Text>
-          <Text style={styles.footerText}>1. 已打通截图导入、真实 OCR 后端、人工确认、重建阵容。</Text>
-          <Text style={styles.footerText}>2. 下一步接入阿里 DashScope 阵容建议接口和位置文案。</Text>
-          <Text style={styles.footerText}>3. 然后补拖拽进替补席、历史快照和延迟行情。</Text>
-        </View>
+        <BenchStrip
+          benchPlayers={benchPlayers}
+          onOpenPlayer={(playerId) => handleOpenPlayer(playerId)}
+        />
       </ScrollView>
 
       <Modal animationType="slide" transparent visible={Boolean(selectedPlayer)}>
@@ -191,10 +221,30 @@ export default function App() {
           <View style={styles.modalCard}>
             <StarCardModal
               player={selectedPlayer}
-              slot={selectedPlayer ? lineup.slots.find((slot) => slot.playerId === selectedPlayer.id) ?? null : null}
+              slot={
+                selectedPlayer
+                  ? lineup.slots.find((slot) => slot.playerId === selectedPlayer.id) ?? null
+                  : null
+              }
               onClose={() => setSelectedPlayer(null)}
               onToggleLock={(slotId) => handleToggleLock(slotId)}
             />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal animationType="slide" transparent visible={Boolean(extraction)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.importModalCard}>
+            {extraction ? (
+              <ImportReviewScreen
+                extraction={extraction}
+                isSubmitting={isSubmittingImport}
+                onBack={() => setExtraction(null)}
+                onConfirm={handleConfirmImport}
+                onUpdateRow={handleUpdateRow}
+              />
+            ) : null}
           </View>
         </View>
       </Modal>
@@ -264,6 +314,27 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontSize: 14,
   },
+  aiCard: {
+    backgroundColor: '#d8eee1',
+    borderRadius: 24,
+    padding: 18,
+    gap: 8,
+  },
+  aiTitle: {
+    color: '#173526',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  aiMeta: {
+    color: '#50705b',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  aiSummary: {
+    color: '#294330',
+    fontSize: 14,
+    lineHeight: 21,
+  },
   hintCard: {
     backgroundColor: '#0e2130',
     borderRadius: 20,
@@ -284,22 +355,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
-  footerCard: {
-    backgroundColor: '#0f1d28',
-    borderRadius: 24,
-    padding: 18,
-    gap: 8,
-  },
-  footerTitle: {
-    color: '#f2f7f8',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  footerText: {
-    color: '#a8bcc6',
-    fontSize: 14,
-    lineHeight: 20,
-  },
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(4, 12, 18, 0.72)',
@@ -313,5 +368,12 @@ const styles = StyleSheet.create({
     paddingTop: 18,
     paddingBottom: 28,
     minHeight: '62%',
+  },
+  importModalCard: {
+    backgroundColor: '#09161f',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingTop: 12,
+    maxHeight: '88%',
   },
 });
