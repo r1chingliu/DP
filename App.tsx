@@ -1,5 +1,8 @@
 import { StatusBar } from 'expo-status-bar';
+import * as ImagePicker from 'expo-image-picker';
+import { useMemo, useState } from 'react';
 import {
+  Alert,
   Modal,
   Pressable,
   SafeAreaView,
@@ -8,37 +11,33 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useMemo, useState } from 'react';
 
 import { BenchStrip } from './src/components/BenchStrip';
+import { ImportReviewScreen } from './src/components/ImportReviewScreen';
 import { PitchBoard } from './src/components/PitchBoard';
 import { PortfolioSummary } from './src/components/PortfolioSummary';
 import { StarCardModal } from './src/components/StarCardModal';
 import { mockPortfolio } from './src/data/mockPortfolio';
-import {
-  buildRecommendedLineup,
-  createInitialAssignments,
-  getBenchPlayers,
-  getLineupPlayer,
-  getPitchSlots,
-  movePlayerBetweenTargets,
-  toggleSlotLock,
-} from './src/lib/lineup';
-import type { PortfolioPlayer } from './src/types/portfolio';
+import { buildRecommendedLineup, createInitialAssignments, getBenchPlayers, getLineupPlayer, getPitchSlots, movePlayerBetweenTargets, toggleSlotLock } from './src/lib/lineup';
+import { buildPlayersFromExtraction } from './src/lib/portfolio';
+import { recognizePortfolioScreenshot } from './src/services/ocr';
+import type { ExtractedHoldingRow, OcrExtractionResult, PortfolioPlayer } from './src/types/portfolio';
+
+type ScreenMode = 'lineup' | 'review';
 
 export default function App() {
-  const [players] = useState(mockPortfolio.players);
-  const [lineup, setLineup] = useState(() =>
-    createInitialAssignments(buildRecommendedLineup(players)),
-  );
+  const [players, setPlayers] = useState(mockPortfolio.players);
+  const [updatedAt, setUpdatedAt] = useState(mockPortfolio.updatedAt);
+  const [lineup, setLineup] = useState(() => createInitialAssignments(buildRecommendedLineup(mockPortfolio.players)));
   const [selectedPlayer, setSelectedPlayer] = useState<PortfolioPlayer | null>(null);
+  const [screenMode, setScreenMode] = useState<ScreenMode>('lineup');
+  const [isImporting, setIsImporting] = useState(false);
+  const [isSubmittingImport, setIsSubmittingImport] = useState(false);
+  const [extraction, setExtraction] = useState<OcrExtractionResult | null>(null);
 
   const pitchSlots = useMemo(() => getPitchSlots(), []);
   const benchPlayers = useMemo(() => getBenchPlayers(players, lineup), [lineup, players]);
-  const totalMarketValue = useMemo(
-    () => players.reduce((sum, player) => sum + player.marketValue, 0),
-    [players],
-  );
+  const totalMarketValue = useMemo(() => players.reduce((sum, player) => sum + player.marketValue, 0), [players]);
 
   const handleOpenPlayer = (playerId: string | null) => {
     if (!playerId) {
@@ -56,6 +55,79 @@ export default function App() {
     setLineup((current) => toggleSlotLock(current, slotId));
   };
 
+  const handleImportScreenshot = async () => {
+    try {
+      setIsImporting(true);
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('需要相册权限', '请允许访问相册，才能选择券商持仓截图。');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 1,
+      });
+
+      if (result.canceled || !result.assets.length) {
+        return;
+      }
+
+      const nextExtraction = await recognizePortfolioScreenshot(result.assets[0].uri);
+      setExtraction(nextExtraction);
+      setScreenMode('review');
+    } catch (error) {
+      Alert.alert('导入失败', '截图导入流程执行失败，请稍后重试。');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleUpdateRow = (rowId: string, patch: Partial<ExtractedHoldingRow>) => {
+    setExtraction((current) =>
+      current
+        ? {
+            ...current,
+            rows: current.rows.map((row) => (row.id === rowId ? { ...row, ...patch } : row)),
+          }
+        : current,
+    );
+  };
+
+  const handleConfirmImport = async () => {
+    if (!extraction) {
+      return;
+    }
+
+    setIsSubmittingImport(true);
+    const importedPlayers = buildPlayersFromExtraction(extraction.rows);
+    setPlayers(importedPlayers);
+    setUpdatedAt(extraction.extractedAt);
+    setLineup(createInitialAssignments(buildRecommendedLineup(importedPlayers)));
+    setScreenMode('lineup');
+    setExtraction(null);
+    setIsSubmittingImport(false);
+  };
+
+  if (screenMode === 'review' && extraction) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar style="light" />
+        <ImportReviewScreen
+          extraction={extraction}
+          isSubmitting={isSubmittingImport}
+          onBack={() => {
+            setScreenMode('lineup');
+            setExtraction(null);
+          }}
+          onConfirm={handleConfirmImport}
+          onUpdateRow={handleUpdateRow}
+        />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="light" />
@@ -65,25 +137,25 @@ export default function App() {
             <Text style={styles.kicker}>Lineup Portfolio</Text>
             <Text style={styles.title}>阵容持仓</Text>
             <Text style={styles.subtitle}>
-              用足球阵型管理股票和 ETF，当前版本先跑通阵容与球星卡体验。
+              用足球阵型管理股票和 ETF。当前版本已经支持导入截图、确认字段和自动重建阵容。
             </Text>
           </View>
-          <Pressable style={styles.aiButton} onPress={handleAutoLineup}>
-            <Text style={styles.aiButtonText}>AI 重新排阵</Text>
-          </Pressable>
+          <View style={styles.actionRow}>
+            <Pressable style={styles.secondaryButton} onPress={handleImportScreenshot} disabled={isImporting}>
+              <Text style={styles.secondaryButtonText}>{isImporting ? '识别中...' : '导入截图'}</Text>
+            </Pressable>
+            <Pressable style={styles.aiButton} onPress={handleAutoLineup}>
+              <Text style={styles.aiButtonText}>AI 重新排阵</Text>
+            </Pressable>
+          </View>
         </View>
 
-        <PortfolioSummary
-          players={players}
-          totalMarketValue={totalMarketValue}
-          formationName={lineup.formationName}
-          updatedAt={mockPortfolio.updatedAt}
-        />
+        <PortfolioSummary players={players} totalMarketValue={totalMarketValue} formationName={lineup.formationName} updatedAt={updatedAt} />
 
         <View style={styles.hintCard}>
           <Text style={styles.hintLabel}>当前操作</Text>
           <Text style={styles.hintText}>
-            轻点卡片进入详情，长按首发球员后拖到另一个位置，松手即可自动换位。
+            轻点卡片进入详情，长按首发球员后拖到另一个位置，松手即可自动换位。导入截图后会进入 OCR 确认页。
           </Text>
         </View>
 
@@ -106,10 +178,10 @@ export default function App() {
         <BenchStrip benchPlayers={benchPlayers} onOpenPlayer={(playerId) => handleOpenPlayer(playerId)} />
 
         <View style={styles.footerCard}>
-          <Text style={styles.footerTitle}>后续开发路线</Text>
-          <Text style={styles.footerText}>1. 券商持仓截图 OCR 导入与人工确认页。</Text>
-          <Text style={styles.footerText}>2. AI 阵型建议服务与可解释排阵规则。</Text>
-          <Text style={styles.footerText}>3. 手势拖拽、历史快照、延迟行情刷新。</Text>
+          <Text style={styles.footerTitle}>当前开发重点</Text>
+          <Text style={styles.footerText}>1. 已打通截图导入、模拟 OCR、人工确认、重建阵容。</Text>
+          <Text style={styles.footerText}>2. 下一步接入真实 OCR 后端和阿里 DashScope 阵容建议接口。</Text>
+          <Text style={styles.footerText}>3. 然后补拖拽进替补席、历史快照和延迟行情。</Text>
         </View>
       </ScrollView>
 
@@ -118,11 +190,7 @@ export default function App() {
           <View style={styles.modalCard}>
             <StarCardModal
               player={selectedPlayer}
-              slot={
-                selectedPlayer
-                  ? lineup.slots.find((slot) => slot.playerId === selectedPlayer.id) ?? null
-                  : null
-              }
+              slot={selectedPlayer ? lineup.slots.find((slot) => slot.playerId === selectedPlayer.id) ?? null : null}
               onClose={() => setSelectedPlayer(null)}
               onToggleLock={(slotId) => handleToggleLock(slotId)}
             />
@@ -165,6 +233,23 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
     marginTop: 8,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  secondaryButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#123346',
+    borderRadius: 999,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  secondaryButtonText: {
+    color: '#d7edf7',
+    fontWeight: '800',
+    fontSize: 14,
   },
   aiButton: {
     alignSelf: 'flex-start',

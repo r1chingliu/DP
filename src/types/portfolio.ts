@@ -45,3 +45,20 @@ export type LineupState = {
   formationName: string;
   slots: LineupSlotAssignment[];
 };
+
+export type ExtractedHoldingRow = {
+  id: string;
+  name: string;
+  marketValue: string;
+  pnlPercent: string;
+  costPrice: string;
+  currentPrice: string;
+  confidence: number;
+};
+
+export type OcrExtractionResult = {
+  imageUri: string;
+  brokerHint: string;
+  extractedAt: string;
+  rows: ExtractedHoldingRow[];
+};
