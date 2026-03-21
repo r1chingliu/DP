@@ -13,11 +13,19 @@ import {
 } from 'react-native';
 
 import { BenchStrip } from './src/components/BenchStrip';
+import { ChemistryCard } from './src/components/ChemistryCard';
 import { ImportReviewScreen } from './src/components/ImportReviewScreen';
 import { PitchBoard } from './src/components/PitchBoard';
 import { PortfolioSummary } from './src/components/PortfolioSummary';
+import { SeasonHonorsCard } from './src/components/SeasonHonorsCard';
 import { StarCardModal } from './src/components/StarCardModal';
+import { WeeklyChallengeCard } from './src/components/WeeklyChallengeCard';
 import { mockPortfolio } from './src/data/mockPortfolio';
+import {
+  buildChemistryBreakdown,
+  buildSeasonHonors,
+  buildWeeklyChallenge,
+} from './src/lib/gameplay';
 import {
   buildRecommendedLineup,
   createInitialAssignments,
@@ -74,6 +82,9 @@ export default function App() {
     () => players.reduce((sum, player) => sum + player.marketValue, 0),
     [players],
   );
+  const chemistry = useMemo(() => buildChemistryBreakdown(players, lineup), [lineup, players]);
+  const weeklyChallenge = useMemo(() => buildWeeklyChallenge(players, lineup), [lineup, players]);
+  const seasonHonors = useMemo(() => buildSeasonHonors(players, lineup), [lineup, players]);
 
   const dragTarget = useMemo(() => {
     if (!dragState) {
@@ -270,6 +281,16 @@ export default function App() {
           updatedAt={updatedAt}
         />
 
+        <WeeklyChallengeCard {...weeklyChallenge} />
+
+        <ChemistryCard
+          attack={chemistry.attack}
+          control={chemistry.control}
+          defense={chemistry.defense}
+          balance={chemistry.balance}
+          total={chemistry.total}
+        />
+
         {aiSuggestion ? (
           <View style={styles.aiCard}>
             <Text style={styles.aiTitle}>AI 阵容点评</Text>
@@ -308,6 +329,8 @@ export default function App() {
           onDragMove={handleDragMove}
           onDragEnd={handleDragEnd}
         />
+
+        <SeasonHonorsCard honors={seasonHonors} />
       </ScrollView>
 
       {dragState && dragCardStyle ? (
