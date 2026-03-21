@@ -61,4 +61,5 @@ export type OcrExtractionResult = {
   brokerHint: string;
   extractedAt: string;
   rows: ExtractedHoldingRow[];
+  rawText?: string;
 };

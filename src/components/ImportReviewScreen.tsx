@@ -32,7 +32,7 @@ export function ImportReviewScreen({
         <Text style={styles.kicker}>OCR Review</Text>
         <Text style={styles.title}>识别确认页</Text>
         <Text style={styles.subtitle}>
-          当前先用模拟识别结果跑通流程。后面接入真实 OCR 后，这里仍然作为人工校验层。
+          当前结果来自真实 OCR 后端，这里作为人工校验层，避免错误持仓直接入库。
         </Text>
       </View>
 
@@ -52,6 +52,13 @@ export function ImportReviewScreen({
         <Image source={{ uri: extraction.imageUri }} style={styles.previewImage} resizeMode="cover" />
         <Text style={styles.previewHint}>识别时间：{extraction.extractedAt}</Text>
       </View>
+
+      {extraction.rawText ? (
+        <View style={styles.previewCard}>
+          <Text style={styles.sectionTitle}>OCR 原始文本</Text>
+          <Text style={styles.rawText}>{extraction.rawText}</Text>
+        </View>
+      ) : null}
 
       <View style={styles.tableCard}>
         <Text style={styles.sectionTitle}>识别字段</Text>
@@ -207,6 +214,11 @@ const styles = StyleSheet.create({
   previewHint: {
     color: '#97b4c2',
     fontSize: 13,
+  },
+  rawText: {
+    color: '#d7e5ea',
+    fontSize: 13,
+    lineHeight: 19,
   },
   tableCard: {
     backgroundColor: '#0f1d28',

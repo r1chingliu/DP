@@ -28,6 +28,9 @@ npm-debug.*
 yarn-debug.*
 yarn-error.*
 
+# OCR runtime
+*.traineddata
+
 # macOS
 .DS_Store
 *.pem

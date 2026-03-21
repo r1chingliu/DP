@@ -20,7 +20,7 @@ import { StarCardModal } from './src/components/StarCardModal';
 import { mockPortfolio } from './src/data/mockPortfolio';
 import { buildRecommendedLineup, createInitialAssignments, getBenchPlayers, getLineupPlayer, getPitchSlots, movePlayerBetweenTargets, toggleSlotLock } from './src/lib/lineup';
 import { buildPlayersFromExtraction } from './src/lib/portfolio';
-import { recognizePortfolioScreenshot } from './src/services/ocr';
+import { extractPortfolioFromBackend } from './src/services/backend';
 import type { ExtractedHoldingRow, OcrExtractionResult, PortfolioPlayer } from './src/types/portfolio';
 
 type ScreenMode = 'lineup' | 'review';
@@ -74,11 +74,12 @@ export default function App() {
         return;
       }
 
-      const nextExtraction = await recognizePortfolioScreenshot(result.assets[0].uri);
+      const nextExtraction = await extractPortfolioFromBackend(result.assets[0]);
       setExtraction(nextExtraction);
       setScreenMode('review');
     } catch (error) {
-      Alert.alert('导入失败', '截图导入流程执行失败，请稍后重试。');
+      const message = error instanceof Error ? error.message : '截图导入流程执行失败，请稍后重试。';
+      Alert.alert('导入失败', message);
     } finally {
       setIsImporting(false);
     }
@@ -179,8 +180,8 @@ export default function App() {
 
         <View style={styles.footerCard}>
           <Text style={styles.footerTitle}>当前开发重点</Text>
-          <Text style={styles.footerText}>1. 已打通截图导入、模拟 OCR、人工确认、重建阵容。</Text>
-          <Text style={styles.footerText}>2. 下一步接入真实 OCR 后端和阿里 DashScope 阵容建议接口。</Text>
+          <Text style={styles.footerText}>1. 已打通截图导入、真实 OCR 后端、人工确认、重建阵容。</Text>
+          <Text style={styles.footerText}>2. 下一步接入阿里 DashScope 阵容建议接口和位置文案。</Text>
           <Text style={styles.footerText}>3. 然后补拖拽进替补席、历史快照和延迟行情。</Text>
         </View>
       </ScrollView>
