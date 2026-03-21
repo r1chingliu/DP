@@ -143,7 +143,8 @@ export function movePlayerBetweenTargets(
   }
 
   if (source.kind === 'slot' && sourceSlotIndex >= 0) {
-    nextSlots[sourceSlotIndex].playerId = target.kind === 'slot' ? targetPlayerId : null;
+    nextSlots[sourceSlotIndex].playerId =
+      target.kind === 'slot' ? targetPlayerId : targetPlayerId;
   }
 
   if (target.kind === 'slot' && targetSlotIndex >= 0) {

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef } from 'react';
 import {
   PanResponder,
   StyleSheet,
@@ -14,24 +14,17 @@ import type { LineupState, PitchSlot, PortfolioPlayer } from '../types/portfolio
 type PitchBoardProps = {
   lineup: LineupState;
   slots: PitchSlot[];
+  activeSlotTargetId: string | null;
+  draggingPlayerId: string | null;
   onOpenPlayer: (playerId: string | null) => void;
-  onMovePlayer: (sourceSlotId: string, targetSlotId: string) => void;
+  onSlotLayout: (
+    slotId: string,
+    layout: { x: number; y: number; width: number; height: number },
+  ) => void;
+  onSlotDragStart: (slotId: string, player: PortfolioPlayer, pageX: number, pageY: number) => void;
+  onDragMove: (pageX: number, pageY: number) => void;
+  onDragEnd: (pageX: number, pageY: number) => void;
   getPlayer: (playerId: string | null) => PortfolioPlayer | null;
-};
-
-type DragState = {
-  sourceSlotId: string;
-  player: PortfolioPlayer;
-  pageX: number;
-  pageY: number;
-  targetSlotId: string | null;
-};
-
-type PitchBounds = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
 };
 
 const CARD_WIDTH = 110;
@@ -40,93 +33,19 @@ const CARD_HEIGHT = 72;
 export function PitchBoard({
   lineup,
   slots,
+  activeSlotTargetId,
+  draggingPlayerId,
   onOpenPlayer,
-  onMovePlayer,
+  onSlotLayout,
+  onSlotDragStart,
+  onDragMove,
+  onDragEnd,
   getPlayer,
 }: PitchBoardProps) {
-  const pitchRef = useRef<View | null>(null);
-  const [dragState, setDragState] = useState<DragState | null>(null);
-  const [pitchBounds, setPitchBounds] = useState<PitchBounds | null>(null);
-
-  const refreshPitchBounds = () => {
-    pitchRef.current?.measureInWindow((x, y, width, height) => {
-      setPitchBounds({ x, y, width, height });
-    });
-  };
-
-  const handlePitchLayout = (_event: LayoutChangeEvent) => {
-    requestAnimationFrame(refreshPitchBounds);
-  };
-
-  const findNearestSlotId = (pageX: number, pageY: number) => {
-    if (!pitchBounds) {
-      return null;
-    }
-
-    let winner: { slotId: string; distance: number } | null = null;
-    for (const slot of slots) {
-      const slotX = pitchBounds.x + (pitchBounds.width * slot.x) / 100;
-      const slotY = pitchBounds.y + (pitchBounds.height * slot.y) / 100;
-      const distance = Math.hypot(slotX - pageX, slotY - pageY);
-
-      if (!winner || distance < winner.distance) {
-        winner = { slotId: slot.id, distance };
-      }
-    }
-
-    return winner?.slotId ?? null;
-  };
-
-  const handleDragStart = (slotId: string, player: PortfolioPlayer, pageX: number, pageY: number) => {
-    setDragState({
-      sourceSlotId: slotId,
-      player,
-      pageX,
-      pageY,
-      targetSlotId: findNearestSlotId(pageX, pageY),
-    });
-  };
-
-  const handleDragMove = (pageX: number, pageY: number) => {
-    setDragState((current) =>
-      current
-        ? {
-            ...current,
-            pageX,
-            pageY,
-            targetSlotId: findNearestSlotId(pageX, pageY),
-          }
-        : current,
-    );
-  };
-
-  const handleDragEnd = (pageX: number, pageY: number) => {
-    setDragState((current) => {
-      if (!current) {
-        return null;
-      }
-
-      const targetSlotId = findNearestSlotId(pageX, pageY);
-      if (targetSlotId && targetSlotId !== current.sourceSlotId) {
-        onMovePlayer(current.sourceSlotId, targetSlotId);
-      }
-
-      return null;
-    });
-  };
-
-  const dragCardStyle =
-    dragState && pitchBounds
-      ? {
-          left: dragState.pageX - pitchBounds.x - CARD_WIDTH / 2,
-          top: dragState.pageY - pitchBounds.y - CARD_HEIGHT / 2,
-        }
-      : null;
-
   return (
     <View style={styles.shell}>
       <Text style={styles.title}>首发阵容</Text>
-      <View ref={pitchRef} style={styles.pitch} onLayout={handlePitchLayout}>
+      <View style={styles.pitch}>
         <View style={styles.centerCircle} />
         <View style={styles.penaltyTop} />
         <View style={styles.penaltyBottom} />
@@ -134,8 +53,8 @@ export function PitchBoard({
         {slots.map((slot) => {
           const assignment = lineup.slots.find((item) => item.slotId === slot.id);
           const player = getPlayer(assignment?.playerId ?? null);
-          const isDraggingOrigin = dragState?.sourceSlotId === slot.id;
-          const isDropTarget = dragState?.targetSlotId === slot.id;
+          const isDraggingOrigin = draggingPlayerId === player?.id;
+          const isDropTarget = activeSlotTargetId === slot.id;
 
           return (
             <View
@@ -155,32 +74,19 @@ export function PitchBoard({
                 isDraggingOrigin={Boolean(isDraggingOrigin)}
                 isDropTarget={Boolean(isDropTarget)}
                 onOpenPlayer={onOpenPlayer}
-                onDragStart={handleDragStart}
-                onDragMove={handleDragMove}
-                onDragEnd={handleDragEnd}
+                onLayout={onSlotLayout}
+                onDragStart={onSlotDragStart}
+                onDragMove={onDragMove}
+                onDragEnd={onDragEnd}
               />
             </View>
           );
         })}
-
-        {dragState && dragCardStyle ? (
-          <View pointerEvents="none" style={[styles.dragCard, dragCardStyle]}>
-            <Text style={styles.slotCode}>{dragState.player.ticker}</Text>
-            <Text style={styles.playerName}>{dragState.player.name}</Text>
-            <Text
-              style={[
-                styles.playerPnl,
-                { color: dragState.player.pnlPercent >= 0 ? '#ffd1c2' : '#8ef0ba' },
-              ]}
-            >
-              {dragState.player.pnlPercent >= 0 ? '+' : ''}
-              {dragState.player.pnlPercent.toFixed(1)}%
-            </Text>
-          </View>
-        ) : null}
       </View>
 
-      <Text style={styles.tip}>长按后持续拖动，松手会吸附到最近位置并与目标球员换位。</Text>
+      <Text style={styles.tip}>
+        长按后拖到另一个首发位置可直接换位，拖到某张替补卡上松手会和该替补互换。
+      </Text>
     </View>
   );
 }
@@ -192,6 +98,10 @@ type DraggableSlotCardProps = {
   isDraggingOrigin: boolean;
   isDropTarget: boolean;
   onOpenPlayer: (playerId: string | null) => void;
+  onLayout: (
+    slotId: string,
+    layout: { x: number; y: number; width: number; height: number },
+  ) => void;
   onDragStart: (slotId: string, player: PortfolioPlayer, pageX: number, pageY: number) => void;
   onDragMove: (pageX: number, pageY: number) => void;
   onDragEnd: (pageX: number, pageY: number) => void;
@@ -204,13 +114,14 @@ function DraggableSlotCard({
   isDraggingOrigin,
   isDropTarget,
   onOpenPlayer,
+  onLayout,
   onDragStart,
   onDragMove,
   onDragEnd,
 }: DraggableSlotCardProps) {
+  const itemRef = useRef<View | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragEnabledRef = useRef(false);
-  const gestureStartRef = useRef<{ pageX: number; pageY: number } | null>(null);
 
   const clearTimer = () => {
     if (longPressTimerRef.current) {
@@ -219,61 +130,10 @@ function DraggableSlotCard({
     }
   };
 
-  const startDrag = (event: GestureResponderEvent) => {
-    if (!player || locked) {
-      return;
-    }
-
-    const { pageX, pageY } = event.nativeEvent;
-    gestureStartRef.current = { pageX, pageY };
-    dragEnabledRef.current = false;
-
-    longPressTimerRef.current = setTimeout(() => {
-      dragEnabledRef.current = true;
-      onDragStart(slot.id, player, pageX, pageY);
-    }, 220);
-  };
-
-  const updateDrag = (event: GestureResponderEvent, gestureState: PanResponderGestureState) => {
-    if (!player || locked) {
-      return;
-    }
-
-    const { pageX, pageY } = event.nativeEvent;
-    const start = gestureStartRef.current;
-    if (!start) {
-      return;
-    }
-
-    if (!dragEnabledRef.current) {
-      const distance = Math.hypot(gestureState.dx, gestureState.dy);
-      if (distance > 12) {
-        clearTimer();
-      }
-      return;
-    }
-
-    onDragMove(pageX, pageY);
-  };
-
-  const finishDrag = (event: GestureResponderEvent) => {
-    const { pageX, pageY } = event.nativeEvent;
-
-    if (dragEnabledRef.current) {
-      onDragEnd(pageX, pageY);
-    } else if (player) {
-      onOpenPlayer(player.id);
-    }
-
-    clearTimer();
-    dragEnabledRef.current = false;
-    gestureStartRef.current = null;
-  };
-
-  const cancelDrag = () => {
-    clearTimer();
-    dragEnabledRef.current = false;
-    gestureStartRef.current = null;
+  const handleLayout = (_event: LayoutChangeEvent) => {
+    itemRef.current?.measureInWindow((x, y, width, height) => {
+      onLayout(slot.id, { x, y, width, height });
+    });
   };
 
   const panResponder = useMemo(
@@ -282,17 +142,58 @@ function DraggableSlotCard({
         onStartShouldSetPanResponder: () => Boolean(player),
         onMoveShouldSetPanResponder: () => Boolean(player),
         onMoveShouldSetPanResponderCapture: () => Boolean(player),
-        onPanResponderGrant: startDrag,
-        onPanResponderMove: updateDrag,
-        onPanResponderRelease: finishDrag,
-        onPanResponderTerminate: cancelDrag,
+        onPanResponderGrant: (event: GestureResponderEvent) => {
+          if (!player || locked) {
+            return;
+          }
+
+          const { pageX, pageY } = event.nativeEvent;
+          dragEnabledRef.current = false;
+          longPressTimerRef.current = setTimeout(() => {
+            dragEnabledRef.current = true;
+            onDragStart(slot.id, player, pageX, pageY);
+          }, 260);
+        },
+        onPanResponderMove: (event: GestureResponderEvent, gestureState: PanResponderGestureState) => {
+          if (!player || locked) {
+            return;
+          }
+
+          const { pageX, pageY } = event.nativeEvent;
+          if (!dragEnabledRef.current) {
+            if (Math.hypot(gestureState.dx, gestureState.dy) > 24) {
+              clearTimer();
+            }
+            return;
+          }
+
+          onDragMove(pageX, pageY);
+        },
+        onPanResponderRelease: (event: GestureResponderEvent) => {
+          const { pageX, pageY } = event.nativeEvent;
+
+          if (dragEnabledRef.current) {
+            onDragEnd(pageX, pageY);
+          } else if (player) {
+            onOpenPlayer(player.id);
+          }
+
+          clearTimer();
+          dragEnabledRef.current = false;
+        },
+        onPanResponderTerminate: () => {
+          clearTimer();
+          dragEnabledRef.current = false;
+        },
         onPanResponderTerminationRequest: () => false,
       }),
-    [player, locked, slot.id],
+    [locked, onDragEnd, onDragMove, onDragStart, onOpenPlayer, player, slot.id],
   );
 
   return (
     <View
+      ref={itemRef}
+      onLayout={handleLayout}
       {...panResponder.panHandlers}
       style={[
         styles.slotButton,
@@ -305,9 +206,7 @@ function DraggableSlotCard({
       {player ? (
         <>
           <Text style={styles.playerName}>{player.name}</Text>
-          <Text
-            style={[styles.playerPnl, { color: player.pnlPercent >= 0 ? '#ffd1c2' : '#8ef0ba' }]}
-          >
+          <Text style={[styles.playerPnl, { color: player.pnlPercent >= 0 ? '#ffd1c2' : '#8ef0ba' }]}>
             {player.pnlPercent >= 0 ? '+' : ''}
             {player.pnlPercent.toFixed(1)}%
           </Text>
@@ -397,19 +296,6 @@ const styles = StyleSheet.create({
   },
   dragOrigin: {
     opacity: 0.18,
-  },
-  dragCard: {
-    position: 'absolute',
-    width: CARD_WIDTH,
-    minHeight: CARD_HEIGHT,
-    backgroundColor: '#0d2330',
-    borderRadius: 18,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#ffe7a5',
-    alignItems: 'center',
-    zIndex: 20,
   },
   slotCode: {
     color: '#97d9b0',

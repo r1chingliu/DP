@@ -26,6 +26,7 @@ import {
   getPitchSlots,
   movePlayerBetweenTargets,
   toggleSlotLock,
+  type LineupTarget,
 } from './src/lib/lineup';
 import { buildPlayersFromExtraction, normalizeExtractedRows } from './src/lib/portfolio';
 import { extractPortfolioFromBackend } from './src/services/backend';
@@ -36,6 +37,20 @@ import type {
   OcrExtractionResult,
   PortfolioPlayer,
 } from './src/types/portfolio';
+
+type Rect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type DragState = {
+  source: LineupTarget;
+  player: PortfolioPlayer;
+  pageX: number;
+  pageY: number;
+};
 
 export default function App() {
   const [players, setPlayers] = useState(mockPortfolio.players);
@@ -49,6 +64,9 @@ export default function App() {
   const [isRequestingAi, setIsRequestingAi] = useState(false);
   const [extraction, setExtraction] = useState<OcrExtractionResult | null>(null);
   const [aiSuggestion, setAiSuggestion] = useState<AiLineupSuggestion | null>(null);
+  const [dragState, setDragState] = useState<DragState | null>(null);
+  const [slotLayouts, setSlotLayouts] = useState<Record<string, Rect>>({});
+  const [benchLayouts, setBenchLayouts] = useState<Record<string, Rect>>({});
 
   const pitchSlots = useMemo(() => getPitchSlots(), []);
   const benchPlayers = useMemo(() => getBenchPlayers(players, lineup), [lineup, players]);
@@ -56,6 +74,19 @@ export default function App() {
     () => players.reduce((sum, player) => sum + player.marketValue, 0),
     [players],
   );
+
+  const dragTarget = useMemo(() => {
+    if (!dragState) {
+      return null;
+    }
+    return resolveDragTarget(
+      dragState.pageX,
+      dragState.pageY,
+      dragState.source,
+      slotLayouts,
+      benchLayouts,
+    );
+  }, [benchLayouts, dragState, slotLayouts]);
 
   const handleOpenPlayer = (playerId: string | null) => {
     if (!playerId) {
@@ -88,7 +119,7 @@ export default function App() {
       setIsImporting(true);
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('需要相册权限', '请允许访问相册，才能选择券商持仓截图。');
+        Alert.alert('需要相册权限', '请允许访问相册后再选择券商持仓截图。');
         return;
       }
 
@@ -108,7 +139,7 @@ export default function App() {
         rows: normalizeExtractedRows(nextExtraction.rows),
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : '截图导入流程执行失败，请稍后重试。';
+      const message = error instanceof Error ? error.message : '截图导入失败，请稍后重试。';
       Alert.alert('导入失败', message);
     } finally {
       setIsImporting(false);
@@ -141,6 +172,63 @@ export default function App() {
     setIsSubmittingImport(false);
   };
 
+  const handleSlotLayout = (slotId: string, layout: Rect) => {
+    setSlotLayouts((current) => ({ ...current, [slotId]: layout }));
+  };
+
+  const handleBenchLayout = (playerId: string, layout: Rect) => {
+    setBenchLayouts((current) => ({ ...current, [playerId]: layout }));
+  };
+
+  const handleSlotDragStart = (slotId: string, player: PortfolioPlayer, pageX: number, pageY: number) => {
+    setDragState({
+      source: { kind: 'slot', id: slotId },
+      player,
+      pageX,
+      pageY,
+    });
+  };
+
+  const handleBenchDragStart = (playerId: string, pageX: number, pageY: number) => {
+    const player = players.find((item) => item.id === playerId);
+    if (!player) {
+      return;
+    }
+
+    setDragState({
+      source: { kind: 'bench', id: playerId },
+      player,
+      pageX,
+      pageY,
+    });
+  };
+
+  const handleDragMove = (pageX: number, pageY: number) => {
+    setDragState((current) => (current ? { ...current, pageX, pageY } : null));
+  };
+
+  const handleDragEnd = (pageX: number, pageY: number) => {
+    setDragState((current) => {
+      if (!current) {
+        return null;
+      }
+
+      const target = resolveDragTarget(pageX, pageY, current.source, slotLayouts, benchLayouts);
+      if (target && !isSameTarget(current.source, target)) {
+        setLineup((lineupState) => movePlayerBetweenTargets(lineupState, current.source, target));
+      }
+
+      return null;
+    });
+  };
+
+  const dragCardStyle = dragState
+    ? {
+        left: dragState.pageX - 55,
+        top: dragState.pageY - 36,
+      }
+    : null;
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="light" />
@@ -150,7 +238,7 @@ export default function App() {
             <Text style={styles.kicker}>Lineup Portfolio</Text>
             <Text style={styles.title}>阵容持仓</Text>
             <Text style={styles.subtitle}>
-              用足球阵型管理股票和 ETF。当前版本支持截图导入、字段确认、拖拽换位和 AI 阵容点评。
+              用足球阵型管理股票和 ETF。当前版本支持截图导入、字段确认、首发替补互换和 AI 阵容点评。
             </Text>
           </View>
           <View style={styles.actionRow}>
@@ -193,31 +281,50 @@ export default function App() {
         <View style={styles.hintCard}>
           <Text style={styles.hintLabel}>当前操作</Text>
           <Text style={styles.hintText}>
-            轻点卡片进入详情，长按首发球员后持续拖动，松手即可自动换位。导入截图后会弹出识别结果小界面。
+            轻点卡片进入详情。长按首发或替补卡片后直接拖动，松手时会按落点和目标球员自动换位。
           </Text>
         </View>
 
         <PitchBoard
           lineup={lineup}
           slots={pitchSlots}
+          activeSlotTargetId={dragTarget?.kind === 'slot' ? dragTarget.id : null}
+          draggingPlayerId={dragState?.player.id ?? null}
           onOpenPlayer={handleOpenPlayer}
-          onMovePlayer={(sourceSlotId, targetSlotId) =>
-            setLineup((current) =>
-              movePlayerBetweenTargets(
-                current,
-                { kind: 'slot', id: sourceSlotId },
-                { kind: 'slot', id: targetSlotId },
-              ),
-            )
-          }
+          onSlotLayout={handleSlotLayout}
+          onSlotDragStart={handleSlotDragStart}
+          onDragMove={handleDragMove}
+          onDragEnd={handleDragEnd}
           getPlayer={(playerId) => getLineupPlayer(players, playerId)}
         />
 
         <BenchStrip
           benchPlayers={benchPlayers}
+          activeBenchTargetId={dragTarget?.kind === 'bench' ? dragTarget.id : null}
+          draggingPlayerId={dragState?.player.id ?? null}
           onOpenPlayer={(playerId) => handleOpenPlayer(playerId)}
+          onBenchItemLayout={handleBenchLayout}
+          onBenchDragStart={handleBenchDragStart}
+          onDragMove={handleDragMove}
+          onDragEnd={handleDragEnd}
         />
       </ScrollView>
+
+      {dragState && dragCardStyle ? (
+        <View pointerEvents="none" style={[styles.dragCard, dragCardStyle]}>
+          <Text style={styles.dragTicker}>{dragState.player.ticker}</Text>
+          <Text style={styles.dragName}>{dragState.player.name}</Text>
+          <Text
+            style={[
+              styles.dragPnl,
+              { color: dragState.player.pnlPercent >= 0 ? '#ffd1c2' : '#8ef0ba' },
+            ]}
+          >
+            {dragState.player.pnlPercent >= 0 ? '+' : ''}
+            {dragState.player.pnlPercent.toFixed(1)}%
+          </Text>
+        </View>
+      ) : null}
 
       <Modal animationType="slide" transparent visible={Boolean(selectedPlayer)}>
         <View style={styles.modalBackdrop}>
@@ -258,6 +365,52 @@ export default function App() {
         </View>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+function isSameTarget(source: LineupTarget, target: LineupTarget) {
+  return source.kind === target.kind && source.id === target.id;
+}
+
+function resolveDragTarget(
+  pageX: number,
+  pageY: number,
+  source: LineupTarget,
+  slotLayouts: Record<string, Rect>,
+  benchLayouts: Record<string, Rect>,
+): LineupTarget | null {
+  const benchTarget = Object.entries(benchLayouts).find(([, rect]) => pointInRect(pageX, pageY, rect));
+  if (benchTarget) {
+    return { kind: 'bench', id: benchTarget[0] };
+  }
+
+  let nearestSlotId: string | null = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  for (const [slotId, rect] of Object.entries(slotLayouts)) {
+    const centerX = rect.x + rect.width / 2;
+    const centerY = rect.y + rect.height / 2;
+    const distance = Math.hypot(centerX - pageX, centerY - pageY);
+
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestSlotId = slotId;
+    }
+  }
+
+  if (!nearestSlotId) {
+    return source;
+  }
+
+  return { kind: 'slot', id: nearestSlotId };
+}
+
+function pointInRect(pageX: number, pageY: number, rect: Rect) {
+  return (
+    pageX >= rect.x &&
+    pageX <= rect.x + rect.width &&
+    pageY >= rect.y &&
+    pageY <= rect.y + rect.height
   );
 }
 
@@ -363,6 +516,37 @@ const styles = StyleSheet.create({
     color: '#dce8ec',
     fontSize: 14,
     lineHeight: 20,
+  },
+  dragCard: {
+    position: 'absolute',
+    width: 110,
+    minHeight: 72,
+    backgroundColor: '#0d2330',
+    borderRadius: 18,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#ffe7a5',
+    alignItems: 'center',
+    zIndex: 30,
+  },
+  dragTicker: {
+    color: '#97d9b0',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  dragName: {
+    color: '#f4faf7',
+    fontSize: 13,
+    fontWeight: '800',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  dragPnl: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 6,
   },
   modalBackdrop: {
     flex: 1,
