@@ -55,6 +55,7 @@ export function StarCardModal({
         <Text style={styles.summary}>{aiNote || player.aiSummary}</Text>
 
         <View style={styles.grid}>
+          <Metric label="股数" value={player.quantity.toLocaleString()} />
           <Metric label="成本价" value={`¥${player.costPrice.toFixed(2)}`} />
           <Metric label="市价" value={`¥${player.currentPrice.toFixed(2)}`} />
           <Metric label="仓位占比" value={`${player.weightPercent.toFixed(1)}%`} />

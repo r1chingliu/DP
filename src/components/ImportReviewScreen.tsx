@@ -72,6 +72,12 @@ export function ImportReviewScreen({
             </View>
             <EditableField label="持仓名称" value={row.name} onChangeText={(value) => onUpdateRow(row.id, { name: value })} />
             <EditableField
+              label="股数"
+              value={row.quantity}
+              onChangeText={(value) => onUpdateRow(row.id, { quantity: value })}
+              keyboardType="numeric"
+            />
+            <EditableField
               label="市值"
               value={row.marketValue}
               onChangeText={(value) => onUpdateRow(row.id, { marketValue: value })}

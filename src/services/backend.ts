@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 
-import type { OcrExtractionResult } from '../types/portfolio';
+import type { OcrExtractionResult, PortfolioPlayer, WeeklyPerformanceResponse } from '../types/portfolio';
 
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_BASE_URL ||
@@ -35,4 +35,23 @@ export async function extractPortfolioFromBackend(asset: {
   }
 
   return response.json() as Promise<OcrExtractionResult>;
+}
+
+export async function fetchWeeklyPerformance(
+  players: PortfolioPlayer[],
+): Promise<WeeklyPerformanceResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/market/weekly`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ players }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `Market backend failed with status ${response.status}`);
+  }
+
+  return response.json() as Promise<WeeklyPerformanceResponse>;
 }

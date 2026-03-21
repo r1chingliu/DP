@@ -30,6 +30,7 @@ const themeLookup: Array<{
 
 export function buildPlayersFromExtraction(rows: ExtractedHoldingRow[]): PortfolioPlayer[] {
   const sanitized = rows.map((row, index) => {
+    const quantity = parseQuantity(row.quantity, row.marketValue, row.currentPrice, row.costPrice);
     const marketValue = parseMarketValue(row.marketValue);
     const pnlPercent = parsePercent(row.pnlPercent);
     const costPrice = parsePrice(row.costPrice, row.name);
@@ -38,6 +39,7 @@ export function buildPlayersFromExtraction(rows: ExtractedHoldingRow[]): Portfol
     return {
       row,
       index,
+      quantity,
       marketValue,
       pnlPercent,
       costPrice,
@@ -47,7 +49,7 @@ export function buildPlayersFromExtraction(rows: ExtractedHoldingRow[]): Portfol
 
   const totalMarketValue = sanitized.reduce((sum, row) => sum + row.marketValue, 0) || 1;
 
-  return sanitized.map(({ row, marketValue, pnlPercent, costPrice, currentPrice, index }) => {
+  return sanitized.map(({ row, quantity, marketValue, pnlPercent, costPrice, currentPrice, index }) => {
     const profile = inferProfile(row.name);
     const codeMatch = row.name.match(/\d{6}/);
 
@@ -56,6 +58,7 @@ export function buildPlayersFromExtraction(rows: ExtractedHoldingRow[]): Portfol
       ticker: codeMatch?.[0] ?? `A${String(index + 1).padStart(3, '0')}`,
       name: row.name,
       kind: /etf/i.test(row.name) ? 'etf' : 'stock',
+      quantity,
       marketValue,
       pnlPercent,
       costPrice,
@@ -72,6 +75,10 @@ export function buildPlayersFromExtraction(rows: ExtractedHoldingRow[]): Portfol
 export function normalizeExtractedRows(rows: ExtractedHoldingRow[]) {
   return rows.map((row) => ({
     ...row,
+    quantity: formatNumericString(
+      parseQuantity(row.quantity, row.marketValue, row.currentPrice, row.costPrice),
+      0,
+    ),
     marketValue: formatNumericString(parseMarketValue(row.marketValue), 0),
     pnlPercent: formatNumericString(parsePercent(row.pnlPercent), 1),
     costPrice: formatNumericString(parsePrice(row.costPrice, row.name), 2),
@@ -81,6 +88,30 @@ export function normalizeExtractedRows(rows: ExtractedHoldingRow[]) {
 
 function parseMarketValue(value: string) {
   return parseIntegerLike(value);
+}
+
+function parseQuantity(
+  quantityText: string,
+  marketValueText: string,
+  currentPriceText: string,
+  costPriceText: string,
+) {
+  const normalized = normalizeNumericText(quantityText, { keepDecimal: false });
+  const parsed = Number(normalized);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return Math.round(parsed);
+  }
+
+  const marketValue = parseMarketValue(marketValueText);
+  const currentPrice = parsePrice(currentPriceText, '');
+  const costPrice = parsePrice(costPriceText, '');
+  const fallbackPrice = currentPrice || costPrice;
+
+  if (marketValue > 0 && fallbackPrice > 0) {
+    return Math.max(1, Math.round(marketValue / fallbackPrice));
+  }
+
+  return 0;
 }
 
 function parsePercent(value: string) {

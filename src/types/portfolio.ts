@@ -15,6 +15,7 @@ export type PortfolioPlayer = {
   ticker: string;
   name: string;
   kind: AssetKind;
+  quantity: number;
   marketValue: number;
   pnlPercent: number;
   costPrice: number;
@@ -49,6 +50,7 @@ export type LineupState = {
 export type ExtractedHoldingRow = {
   id: string;
   name: string;
+  quantity: string;
   marketValue: string;
   pnlPercent: string;
   costPrice: string;
@@ -71,4 +73,16 @@ export type AiLineupSuggestion = {
     playerId: string;
     note: string;
   }>;
+};
+
+export type WeeklyPerformancePoint = {
+  label: string;
+  portfolio: number;
+  shanghai: number;
+  csi300: number;
+};
+
+export type WeeklyPerformanceResponse = {
+  updatedAt: string;
+  points: WeeklyPerformancePoint[];
 };

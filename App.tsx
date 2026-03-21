@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -20,6 +20,7 @@ import { PortfolioSummary } from './src/components/PortfolioSummary';
 import { SeasonHonorsCard } from './src/components/SeasonHonorsCard';
 import { StarCardModal } from './src/components/StarCardModal';
 import { WeeklyChallengeCard } from './src/components/WeeklyChallengeCard';
+import { WeeklyPerformanceCard } from './src/components/WeeklyPerformanceCard';
 import { mockPortfolio } from './src/data/mockPortfolio';
 import {
   buildChemistryBreakdown,
@@ -37,13 +38,14 @@ import {
   type LineupTarget,
 } from './src/lib/lineup';
 import { buildPlayersFromExtraction, normalizeExtractedRows } from './src/lib/portfolio';
-import { extractPortfolioFromBackend } from './src/services/backend';
+import { extractPortfolioFromBackend, fetchWeeklyPerformance } from './src/services/backend';
 import { requestAiLineupSuggestion } from './src/services/lineup';
 import type {
   AiLineupSuggestion,
   ExtractedHoldingRow,
   OcrExtractionResult,
   PortfolioPlayer,
+  WeeklyPerformanceResponse,
 } from './src/types/portfolio';
 
 type Rect = {
@@ -72,6 +74,7 @@ export default function App() {
   const [isRequestingAi, setIsRequestingAi] = useState(false);
   const [extraction, setExtraction] = useState<OcrExtractionResult | null>(null);
   const [aiSuggestion, setAiSuggestion] = useState<AiLineupSuggestion | null>(null);
+  const [weeklyPerformance, setWeeklyPerformance] = useState<WeeklyPerformanceResponse | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [slotLayouts, setSlotLayouts] = useState<Record<string, Rect>>({});
   const [benchLayouts, setBenchLayouts] = useState<Record<string, Rect>>({});
@@ -85,6 +88,27 @@ export default function App() {
   const chemistry = useMemo(() => buildChemistryBreakdown(players, lineup), [lineup, players]);
   const weeklyChallenge = useMemo(() => buildWeeklyChallenge(players, lineup), [lineup, players]);
   const seasonHonors = useMemo(() => buildSeasonHonors(players, lineup), [lineup, players]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetchWeeklyPerformance(players)
+      .then((response) => {
+        if (!cancelled) {
+          setWeeklyPerformance(response);
+        }
+      })
+      .catch((error) => {
+        console.warn('weekly performance failed', error);
+        if (!cancelled) {
+          setWeeklyPerformance(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [players]);
 
   const dragTarget = useMemo(() => {
     if (!dragState) {
@@ -289,6 +313,11 @@ export default function App() {
           defense={chemistry.defense}
           balance={chemistry.balance}
           total={chemistry.total}
+        />
+
+        <WeeklyPerformanceCard
+          points={weeklyPerformance?.points ?? []}
+          updatedAt={weeklyPerformance?.updatedAt ?? null}
         />
 
         {aiSuggestion ? (
