@@ -17,14 +17,12 @@ import { StarCardModal } from './src/components/StarCardModal';
 import { mockPortfolio } from './src/data/mockPortfolio';
 import {
   buildRecommendedLineup,
-  buildSwapCandidateLabel,
   createInitialAssignments,
   getBenchPlayers,
   getLineupPlayer,
   getPitchSlots,
   movePlayerBetweenTargets,
   toggleSlotLock,
-  type LineupTarget,
 } from './src/lib/lineup';
 import type { PortfolioPlayer } from './src/types/portfolio';
 
@@ -34,7 +32,6 @@ export default function App() {
     createInitialAssignments(buildRecommendedLineup(players)),
   );
   const [selectedPlayer, setSelectedPlayer] = useState<PortfolioPlayer | null>(null);
-  const [selectedTarget, setSelectedTarget] = useState<LineupTarget | null>(null);
 
   const pitchSlots = useMemo(() => getPitchSlots(), []);
   const benchPlayers = useMemo(() => getBenchPlayers(players, lineup), [lineup, players]);
@@ -51,33 +48,13 @@ export default function App() {
     setSelectedPlayer(player);
   };
 
-  const handleSelectTarget = (target: LineupTarget) => {
-    if (!selectedTarget) {
-      setSelectedTarget(target);
-      return;
-    }
-
-    if (selectedTarget.kind === target.kind && selectedTarget.id === target.id) {
-      setSelectedTarget(null);
-      return;
-    }
-
-    setLineup((current) => movePlayerBetweenTargets(current, selectedTarget, target));
-    setSelectedTarget(null);
-  };
-
   const handleAutoLineup = () => {
     setLineup(createInitialAssignments(buildRecommendedLineup(players)));
-    setSelectedTarget(null);
   };
 
   const handleToggleLock = (slotId: string) => {
     setLineup((current) => toggleSlotLock(current, slotId));
   };
-
-  const highlightedLabel = selectedTarget
-    ? buildSwapCandidateLabel(selectedTarget, lineup, players)
-    : '点一次卡片进入详情，长按球场位置或替补卡片后再点另一个目标可完成换位。';
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -105,24 +82,28 @@ export default function App() {
 
         <View style={styles.hintCard}>
           <Text style={styles.hintLabel}>当前操作</Text>
-          <Text style={styles.hintText}>{highlightedLabel}</Text>
+          <Text style={styles.hintText}>
+            轻点卡片进入详情，长按首发球员后拖到另一个位置，松手即可自动换位。
+          </Text>
         </View>
 
         <PitchBoard
           lineup={lineup}
           slots={pitchSlots}
           onOpenPlayer={handleOpenPlayer}
-          onSelectTarget={handleSelectTarget}
-          selectedTarget={selectedTarget}
+          onMovePlayer={(sourceSlotId, targetSlotId) =>
+            setLineup((current) =>
+              movePlayerBetweenTargets(
+                current,
+                { kind: 'slot', id: sourceSlotId },
+                { kind: 'slot', id: targetSlotId },
+              ),
+            )
+          }
           getPlayer={(playerId) => getLineupPlayer(players, playerId)}
         />
 
-        <BenchStrip
-          benchPlayers={benchPlayers}
-          onOpenPlayer={(playerId) => handleOpenPlayer(playerId)}
-          onSelectBench={(playerId) => handleSelectTarget({ kind: 'bench', id: playerId })}
-          selectedTarget={selectedTarget}
-        />
+        <BenchStrip benchPlayers={benchPlayers} onOpenPlayer={(playerId) => handleOpenPlayer(playerId)} />
 
         <View style={styles.footerCard}>
           <Text style={styles.footerTitle}>后续开发路线</Text>

@@ -1,21 +1,13 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { PortfolioPlayer } from '../types/portfolio';
-import type { LineupTarget } from '../lib/lineup';
 
 type BenchStripProps = {
   benchPlayers: PortfolioPlayer[];
-  selectedTarget: LineupTarget | null;
   onOpenPlayer: (playerId: string) => void;
-  onSelectBench: (playerId: string) => void;
 };
 
-export function BenchStrip({
-  benchPlayers,
-  selectedTarget,
-  onOpenPlayer,
-  onSelectBench,
-}: BenchStripProps) {
+export function BenchStrip({ benchPlayers, onOpenPlayer }: BenchStripProps) {
   return (
     <View style={styles.card}>
       <View style={styles.header}>
@@ -25,15 +17,11 @@ export function BenchStrip({
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.list}>
         {benchPlayers.map((player) => {
-          const selected = selectedTarget?.kind === 'bench' && selectedTarget.id === player.id;
-
           return (
             <Pressable
               key={player.id}
               onPress={() => onOpenPlayer(player.id)}
-              onLongPress={() => onSelectBench(player.id)}
-              delayLongPress={180}
-              style={[styles.item, selected && styles.selected]}
+              style={styles.item}
             >
               <Text style={styles.name}>{player.name}</Text>
               <Text style={styles.meta}>{player.roleLabel}</Text>
@@ -80,9 +68,6 @@ const styles = StyleSheet.create({
     padding: 14,
     borderWidth: 1,
     borderColor: 'rgba(148, 192, 214, 0.22)',
-  },
-  selected: {
-    borderColor: '#ffe29a',
   },
   name: {
     color: '#f8fbfb',

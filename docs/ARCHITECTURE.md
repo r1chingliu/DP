@@ -25,6 +25,13 @@
 - `SQLAlchemy`
 - `Redis`
 
+服务端环境变量建议：
+
+- `DASHSCOPE_BASE_URL`
+- `DASHSCOPE_API_KEY`
+
+不要把大模型密钥直接放进 React Native 客户端代码或提交到 Git。
+
 ## OCR 层
 
 建议路线：
