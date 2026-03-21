@@ -1,19 +1,40 @@
 import type { ExtractedHoldingRow, PortfolioPlayer, RoleProfile } from '../types/portfolio';
 
-const themeLookup: Array<{ pattern: RegExp; themes: string[]; roleProfile: RoleProfile; roleLabel: string }> = [
+const themeLookup: Array<{
+  pattern: RegExp;
+  themes: string[];
+  roleProfile: RoleProfile;
+  roleLabel: string;
+}> = [
   { pattern: /黄金|gold/i, themes: ['避险', '商品'], roleProfile: 'keeper', roleLabel: '守门员' },
   { pattern: /国债|债|bond/i, themes: ['债券', '低波'], roleProfile: 'anchor', roleLabel: '后腰屏障' },
-  { pattern: /300|500|1000|上证|沪深|宽基/i, themes: ['宽基', '核心底仓'], roleProfile: 'engine', roleLabel: '中场发动机' },
-  { pattern: /证券|芯片|科技|创业板|纳指/i, themes: ['成长', '高弹性'], roleProfile: 'wing', roleLabel: '冲击型边锋' },
-  { pattern: /红利|银行|平安|蓝筹/i, themes: ['红利', '防守'], roleProfile: 'shield', roleLabel: '防守型后卫' },
+  {
+    pattern: /300|500|1000|上证|沪深|宽基/i,
+    themes: ['宽基', '核心底仓'],
+    roleProfile: 'engine',
+    roleLabel: '中场发动机',
+  },
+  {
+    pattern: /证券|芯片|科技|创业板|纳指/i,
+    themes: ['成长', '高弹性'],
+    roleProfile: 'wing',
+    roleLabel: '冲击型边锋',
+  },
+  {
+    pattern: /红利|银行|平安|蓝筹/i,
+    themes: ['红利', '防守'],
+    roleProfile: 'shield',
+    roleLabel: '防守型后卫',
+  },
 ];
 
 export function buildPlayersFromExtraction(rows: ExtractedHoldingRow[]): PortfolioPlayer[] {
   const sanitized = rows.map((row, index) => {
-    const marketValue = parseNumeric(row.marketValue);
-    const pnlPercent = parseNumeric(row.pnlPercent);
-    const costPrice = parseNumeric(row.costPrice);
-    const currentPrice = parseNumeric(row.currentPrice);
+    const marketValue = parseMarketValue(row.marketValue);
+    const pnlPercent = parsePercent(row.pnlPercent);
+    const costPrice = parsePrice(row.costPrice, row.name);
+    const currentPrice = parsePrice(row.currentPrice, row.name);
+
     return {
       row,
       index,
@@ -48,10 +69,95 @@ export function buildPlayersFromExtraction(rows: ExtractedHoldingRow[]): Portfol
   });
 }
 
-export function parseNumeric(value: string) {
-  const cleaned = value.replace(/[,，%\s元¥]/g, '');
-  const parsed = Number(cleaned);
+export function normalizeExtractedRows(rows: ExtractedHoldingRow[]) {
+  return rows.map((row) => ({
+    ...row,
+    marketValue: formatNumericString(parseMarketValue(row.marketValue), 0),
+    pnlPercent: formatNumericString(parsePercent(row.pnlPercent), 1),
+    costPrice: formatNumericString(parsePrice(row.costPrice, row.name), 2),
+    currentPrice: formatNumericString(parsePrice(row.currentPrice, row.name), 2),
+  }));
+}
+
+function parseMarketValue(value: string) {
+  return parseIntegerLike(value);
+}
+
+function parsePercent(value: string) {
+  const normalized = normalizeNumericText(value, { keepDecimal: true });
+  if (!normalized) {
+    return 0;
+  }
+
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+
+  if (!normalized.includes('.') && Math.abs(parsed) >= 10 && Math.abs(parsed) < 1000) {
+    return parsed / 10;
+  }
+
+  return parsed;
+}
+
+function parsePrice(value: string, assetName: string) {
+  const normalized = normalizeNumericText(value, { keepDecimal: true });
+  if (!normalized) {
+    return 0;
+  }
+
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+
+  if (normalized.includes('.')) {
+    return parsed;
+  }
+
+  const digitsOnly = normalized.replace('-', '');
+  const looksLikeFund =
+    /etf|lof|指数|基金|创业板|纳指|黄金|国债|沪深|上证/i.test(assetName);
+
+  if (looksLikeFund && digitsOnly.length >= 3) {
+    return parsed / 100;
+  }
+
+  return parsed;
+}
+
+function parseIntegerLike(value: string) {
+  const normalized = normalizeNumericText(value, { keepDecimal: false });
+  const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeNumericText(value: string, options: { keepDecimal: boolean }) {
+  const cleaned = value
+    .replace(/[，,\s%元¥￥]/g, '')
+    .replace(/[OoＯo]/g, '0')
+    .replace(/[Il｜|]/g, '1')
+    .replace(/[Ss]/g, '5')
+    .replace(/[B]/g, '8')
+    .replace(/[。．]/g, '.')
+    .replace(/-/g, '-')
+    .replace(/[^0-9.\-]/g, '');
+
+  if (!cleaned) {
+    return '';
+  }
+
+  const sign = cleaned.startsWith('-') ? '-' : '';
+  const body = cleaned.replace(/-/g, '');
+
+  if (options.keepDecimal) {
+    const [head, ...rest] = body.split('.');
+    const merged = `${head}${rest.join('')}`;
+    return sign + (rest.length ? `${head}.${rest.join('')}` : merged);
+  }
+
+  return sign + body.replace(/\./g, '');
 }
 
 function inferProfile(name: string) {
@@ -69,4 +175,12 @@ function inferProfile(name: string) {
 
 function buildAiSummary(name: string, roleLabel: string, themes: string[]) {
   return `${name} 当前被编排为${roleLabel}，主要依据是 ${themes.join(' / ')} 标签与仓位结构。`;
+}
+
+function formatNumericString(value: number, digits: number) {
+  if (!Number.isFinite(value)) {
+    return '';
+  }
+
+  return digits === 0 ? String(Math.round(value)) : value.toFixed(digits);
 }

@@ -5,6 +5,7 @@ import type { LineupSlotAssignment, PortfolioPlayer } from '../types/portfolio';
 type StarCardModalProps = {
   player: PortfolioPlayer | null;
   slot: LineupSlotAssignment | null;
+  aiNote: string | null;
   onClose: () => void;
   onToggleLock: (slotId: string) => void;
 };
@@ -12,6 +13,7 @@ type StarCardModalProps = {
 export function StarCardModal({
   player,
   slot,
+  aiNote,
   onClose,
   onToggleLock,
 }: StarCardModalProps) {
@@ -50,11 +52,11 @@ export function StarCardModal({
           </View>
         </View>
 
-        <Text style={styles.summary}>{player.aiSummary}</Text>
+        <Text style={styles.summary}>{aiNote || player.aiSummary}</Text>
 
         <View style={styles.grid}>
-          <Metric label="成本价" value={`¥${player.costPrice}`} />
-          <Metric label="市价" value={`¥${player.currentPrice}`} />
+          <Metric label="成本价" value={`¥${player.costPrice.toFixed(2)}`} />
+          <Metric label="市价" value={`¥${player.currentPrice.toFixed(2)}`} />
           <Metric label="仓位占比" value={`${player.weightPercent.toFixed(1)}%`} />
           <Metric label="主题" value={player.themes.join(' / ')} />
         </View>

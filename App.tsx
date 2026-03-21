@@ -27,7 +27,7 @@ import {
   movePlayerBetweenTargets,
   toggleSlotLock,
 } from './src/lib/lineup';
-import { buildPlayersFromExtraction } from './src/lib/portfolio';
+import { buildPlayersFromExtraction, normalizeExtractedRows } from './src/lib/portfolio';
 import { extractPortfolioFromBackend } from './src/services/backend';
 import { requestAiLineupSuggestion } from './src/services/lineup';
 import type {
@@ -103,7 +103,10 @@ export default function App() {
       }
 
       const nextExtraction = await extractPortfolioFromBackend(result.assets[0]);
-      setExtraction(nextExtraction);
+      setExtraction({
+        ...nextExtraction,
+        rows: normalizeExtractedRows(nextExtraction.rows),
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : '截图导入流程执行失败，请稍后重试。';
       Alert.alert('导入失败', message);
@@ -224,6 +227,12 @@ export default function App() {
               slot={
                 selectedPlayer
                   ? lineup.slots.find((slot) => slot.playerId === selectedPlayer.id) ?? null
+                  : null
+              }
+              aiNote={
+                selectedPlayer
+                  ? aiSuggestion?.playerNotes.find((item) => item.playerId === selectedPlayer.id)?.note ??
+                    null
                   : null
               }
               onClose={() => setSelectedPlayer(null)}
