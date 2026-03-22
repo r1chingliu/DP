@@ -263,6 +263,9 @@ export default function App() {
         top: dragState.pageY - 36,
       }
     : null;
+  const dragTargetLabel = dragTarget
+    ? describeDragTarget(dragTarget, pitchSlots, players)
+    : '拖到目标位置后松手换位';
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -375,6 +378,7 @@ export default function App() {
             {dragState.player.pnlPercent >= 0 ? '+' : ''}
             {dragState.player.pnlPercent.toFixed(1)}%
           </Text>
+          <Text style={styles.dragHint}>{dragTargetLabel}</Text>
         </View>
       ) : null}
 
@@ -431,30 +435,20 @@ function resolveDragTarget(
   slotLayouts: Record<string, Rect>,
   benchLayouts: Record<string, Rect>,
 ): LineupTarget | null {
-  const benchTarget = Object.entries(benchLayouts).find(([, rect]) => pointInRect(pageX, pageY, rect));
+  const benchTarget = Object.entries(benchLayouts).find(([, rect]) =>
+    pointInRect(pageX, pageY, expandRect(rect, 20)),
+  );
   if (benchTarget) {
     return { kind: 'bench', id: benchTarget[0] };
   }
 
-  let nearestSlotId: string | null = null;
-  let nearestDistance = Number.POSITIVE_INFINITY;
-
   for (const [slotId, rect] of Object.entries(slotLayouts)) {
-    const centerX = rect.x + rect.width / 2;
-    const centerY = rect.y + rect.height / 2;
-    const distance = Math.hypot(centerX - pageX, centerY - pageY);
-
-    if (distance < nearestDistance) {
-      nearestDistance = distance;
-      nearestSlotId = slotId;
+    if (pointInRect(pageX, pageY, expandRect(rect, 26))) {
+      return { kind: 'slot', id: slotId };
     }
   }
 
-  if (!nearestSlotId) {
-    return source;
-  }
-
-  return { kind: 'slot', id: nearestSlotId };
+  return source;
 }
 
 function pointInRect(pageX: number, pageY: number, rect: Rect) {
@@ -464,6 +458,29 @@ function pointInRect(pageX: number, pageY: number, rect: Rect) {
     pageY >= rect.y &&
     pageY <= rect.y + rect.height
   );
+}
+
+function expandRect(rect: Rect, padding: number): Rect {
+  return {
+    x: rect.x - padding,
+    y: rect.y - padding,
+    width: rect.width + padding * 2,
+    height: rect.height + padding * 2,
+  };
+}
+
+function describeDragTarget(
+  target: LineupTarget,
+  pitchSlots: ReturnType<typeof getPitchSlots>,
+  players: PortfolioPlayer[],
+) {
+  if (target.kind === 'bench') {
+    const benchPlayer = players.find((player) => player.id === target.id);
+    return benchPlayer ? `松手后与替补 ${benchPlayer.name} 交换` : '松手后换到替补席';
+  }
+
+  const slot = pitchSlots.find((item) => item.id === target.id);
+  return slot ? `松手后换到 ${slot.shortLabel}` : '拖到目标位置后松手换位';
 }
 
 const styles = StyleSheet.create({
@@ -599,6 +616,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     marginTop: 6,
+  },
+  dragHint: {
+    marginTop: 7,
+    color: '#ffe7a5',
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   modalBackdrop: {
     flex: 1,
