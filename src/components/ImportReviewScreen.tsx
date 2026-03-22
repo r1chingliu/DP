@@ -23,6 +23,11 @@ export function ImportReviewScreen({
     return extraction.rows.length ? Math.round((total / extraction.rows.length) * 100) : 0;
   }, [extraction.rows]);
 
+  const lowConfidenceCount = useMemo(
+    () => extraction.rows.filter((row) => row.confidence < 0.88).length,
+    [extraction.rows],
+  );
+
   return (
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.header}>
@@ -34,7 +39,7 @@ export function ImportReviewScreen({
         </View>
         <Text style={styles.title}>识别确认页</Text>
         <Text style={styles.subtitle}>
-          这里是人工校验层。小数点、符号和个别字段看起来不对时，先在这里改正再导入。
+          这里是导入前的人工校验层。名称、成本价、市价、盈亏比例看起来不对时，先在这里改正再导入。
         </Text>
       </View>
 
@@ -48,6 +53,22 @@ export function ImportReviewScreen({
           <Text style={styles.summaryValue}>{avgConfidence}%</Text>
         </View>
       </View>
+
+      <View style={styles.metricsRow}>
+        <MetricCard label="识别行数" value={String(extraction.rows.length)} />
+        <MetricCard label="低置信度" value={String(lowConfidenceCount)} accent="#ffcf7d" />
+      </View>
+
+      {extraction.warnings?.length ? (
+        <View style={styles.warningCard}>
+          <Text style={styles.warningTitle}>导入提醒</Text>
+          {extraction.warnings.map((warning) => (
+            <Text key={warning} style={styles.warningText}>
+              • {warning}
+            </Text>
+          ))}
+        </View>
+      ) : null}
 
       <View style={styles.previewCard}>
         <Text style={styles.sectionTitle}>截图预览</Text>
@@ -72,7 +93,7 @@ export function ImportReviewScreen({
             </View>
             <EditableField label="持仓名称" value={row.name} onChangeText={(value) => onUpdateRow(row.id, { name: value })} />
             <EditableField
-              label="股数"
+              label="数量"
               value={row.quantity}
               onChangeText={(value) => onUpdateRow(row.id, { quantity: value })}
               keyboardType="numeric"
@@ -154,6 +175,23 @@ function ConfidenceBadge({ confidence }: { confidence: number }) {
   );
 }
 
+function MetricCard({
+  label,
+  value,
+  accent = '#d8eee1',
+}: {
+  label: string;
+  value: string;
+  accent?: string;
+}) {
+  return (
+    <View style={styles.metricCard}>
+      <Text style={styles.metricLabel}>{label}</Text>
+      <Text style={[styles.metricValue, { color: accent }]}>{value}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 18,
@@ -211,6 +249,44 @@ const styles = StyleSheet.create({
     color: '#173526',
     fontSize: 16,
     fontWeight: '800',
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  metricCard: {
+    flex: 1,
+    backgroundColor: '#102330',
+    borderRadius: 20,
+    padding: 16,
+  },
+  metricLabel: {
+    color: '#8cb0c3',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  metricValue: {
+    fontSize: 24,
+    fontWeight: '800',
+  },
+  warningCard: {
+    backgroundColor: '#3b2a13',
+    borderRadius: 20,
+    padding: 16,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#8f6230',
+  },
+  warningTitle: {
+    color: '#ffd98c',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  warningText: {
+    color: '#ffe8b8',
+    fontSize: 14,
+    lineHeight: 20,
   },
   previewCard: {
     backgroundColor: '#0f1d28',

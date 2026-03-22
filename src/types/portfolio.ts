@@ -64,6 +64,7 @@ export type OcrExtractionResult = {
   extractedAt: string;
   rows: ExtractedHoldingRow[];
   rawText?: string;
+  warnings?: string[];
 };
 
 export type AiLineupSuggestion = {

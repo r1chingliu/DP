@@ -29,35 +29,38 @@ const themeLookup: Array<{
 ];
 
 export function buildPlayersFromExtraction(rows: ExtractedHoldingRow[]): PortfolioPlayer[] {
-  const sanitized = rows.map((row, index) => {
-    const quantity = parseQuantity(row.quantity, row.marketValue, row.currentPrice, row.costPrice);
-    const marketValue = parseMarketValue(row.marketValue);
-    const pnlPercent = parsePercent(row.pnlPercent);
-    const costPrice = parsePrice(row.costPrice, row.name);
-    const currentPrice = parsePrice(row.currentPrice, row.name);
+  const sanitized = rows
+    .map((row, index) => {
+      const quantity = parseQuantity(row.quantity, row.marketValue, row.currentPrice, row.costPrice);
+      const marketValue = parseMarketValue(row.marketValue);
+      const pnlPercent = parsePercent(row.pnlPercent);
+      const costPrice = parsePrice(row.costPrice, row.name);
+      const currentPrice = parsePrice(row.currentPrice, row.name);
 
-    return {
-      row,
-      index,
-      quantity,
-      marketValue,
-      pnlPercent,
-      costPrice,
-      currentPrice,
-    };
-  });
+      return {
+        row,
+        index,
+        quantity,
+        marketValue,
+        pnlPercent,
+        costPrice,
+        currentPrice,
+      };
+    })
+    .filter(({ row, marketValue }) => row.name.trim().length > 0 && marketValue > 0);
 
   const totalMarketValue = sanitized.reduce((sum, row) => sum + row.marketValue, 0) || 1;
 
   return sanitized.map(({ row, quantity, marketValue, pnlPercent, costPrice, currentPrice, index }) => {
-    const profile = inferProfile(row.name);
-    const codeMatch = row.name.match(/\d{6}/);
+    const normalizedName = normalizeAssetName(row.name);
+    const profile = inferProfile(normalizedName);
+    const codeMatch = normalizedName.match(/\d{6}/);
 
     return {
       id: codeMatch?.[0] ?? `asset-${index + 1}`,
       ticker: codeMatch?.[0] ?? `A${String(index + 1).padStart(3, '0')}`,
-      name: row.name,
-      kind: /etf/i.test(row.name) ? 'etf' : 'stock',
+      name: normalizedName,
+      kind: /etf|lof/i.test(normalizedName) ? 'etf' : 'stock',
       quantity,
       marketValue,
       pnlPercent,
@@ -67,23 +70,26 @@ export function buildPlayersFromExtraction(rows: ExtractedHoldingRow[]): Portfol
       themes: profile.themes,
       roleProfile: profile.roleProfile,
       roleLabel: profile.roleLabel,
-      aiSummary: buildAiSummary(row.name, profile.roleLabel, profile.themes),
+      aiSummary: buildAiSummary(normalizedName, profile.roleLabel, profile.themes),
     };
   });
 }
 
 export function normalizeExtractedRows(rows: ExtractedHoldingRow[]) {
-  return rows.map((row) => ({
-    ...row,
-    quantity: formatNumericString(
-      parseQuantity(row.quantity, row.marketValue, row.currentPrice, row.costPrice),
-      0,
-    ),
-    marketValue: formatNumericString(parseMarketValue(row.marketValue), 0),
-    pnlPercent: formatNumericString(parsePercent(row.pnlPercent), 1),
-    costPrice: formatNumericString(parsePrice(row.costPrice, row.name), 2),
-    currentPrice: formatNumericString(parsePrice(row.currentPrice, row.name), 2),
-  }));
+  return rows
+    .map((row) => ({
+      ...row,
+      name: normalizeAssetName(row.name),
+      quantity: formatNumericString(
+        parseQuantity(row.quantity, row.marketValue, row.currentPrice, row.costPrice),
+        0,
+      ),
+      marketValue: formatNumericString(parseMarketValue(row.marketValue), 0),
+      pnlPercent: formatNumericString(parsePercent(row.pnlPercent), 1),
+      costPrice: formatNumericString(parsePrice(row.costPrice, row.name), 2),
+      currentPrice: formatNumericString(parsePrice(row.currentPrice, row.name), 2),
+    }))
+    .filter((row) => row.name || row.marketValue || row.quantity);
 }
 
 function parseMarketValue(value: string) {
@@ -166,13 +172,12 @@ function parseIntegerLike(value: string) {
 
 function normalizeNumericText(value: string, options: { keepDecimal: boolean }) {
   const cleaned = value
-    .replace(/[，,\s%元¥￥]/g, '')
-    .replace(/[OoＯo]/g, '0')
-    .replace(/[Il｜|]/g, '1')
+    .replace(/[¥￥,\s%元股份]/g, '')
+    .replace(/[OoＯо]/g, '0')
+    .replace(/[Il|丨]/g, '1')
     .replace(/[Ss]/g, '5')
     .replace(/[B]/g, '8')
     .replace(/[。．]/g, '.')
-    .replace(/-/g, '-')
     .replace(/[^0-9.\-]/g, '');
 
   if (!cleaned) {
@@ -184,11 +189,18 @@ function normalizeNumericText(value: string, options: { keepDecimal: boolean }) 
 
   if (options.keepDecimal) {
     const [head, ...rest] = body.split('.');
-    const merged = `${head}${rest.join('')}`;
-    return sign + (rest.length ? `${head}.${rest.join('')}` : merged);
+    return sign + (rest.length ? `${head}.${rest.join('')}` : head);
   }
 
   return sign + body.replace(/\./g, '');
+}
+
+function normalizeAssetName(value: string) {
+  return value
+    .replace(/\s+/g, '')
+    .replace(/[()（）]/g, '')
+    .replace(/[%$]/g, '')
+    .trim();
 }
 
 function inferProfile(name: string) {

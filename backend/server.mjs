@@ -56,10 +56,6 @@ app.post('/api/lineup/suggest', async (req, res) => {
 
 app.post('/api/ocr/extract', upload.single('file'), async (req, res) => {
   try {
-    if (!DASHSCOPE_API_KEY) {
-      return res.status(500).json({ detail: 'DASHSCOPE_API_KEY is not configured' });
-    }
-
     if (!req.file) {
       return res.status(400).json({ detail: 'Uploaded file is required' });
     }
@@ -72,13 +68,18 @@ app.post('/api/ocr/extract', upload.single('file'), async (req, res) => {
       return res.status(422).json({ detail: 'OCR did not detect readable text from the screenshot' });
     }
 
-    const rows = await structurePortfolioText(rawText);
+    const heuristicRows = extractPortfolioRowsHeuristically(rawText);
+    const structured = await structurePortfolioText(rawText, heuristicRows);
+
     return res.json({
       imageUri: `data:${req.file.mimetype || 'image/png'};base64,${req.file.buffer.toString('base64')}`,
-      brokerHint: 'Tesseract OCR + DashScope Structuring',
+      brokerHint: structured.usedModel
+        ? 'Tesseract OCR + DashScope Structuring + Rule Fallback'
+        : 'Tesseract OCR + Rule Fallback',
       extractedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
-      rows,
+      rows: structured.rows,
       rawText,
+      warnings: buildExtractionWarnings(structured.rows, structured.usedModel, heuristicRows.length),
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : 'OCR extraction failed';
@@ -118,17 +119,24 @@ async function getOcrWorker() {
   return ocrWorkerPromise;
 }
 
-async function structurePortfolioText(rawText) {
-  const prompt = `
-你是一个中文券商持仓 OCR 文本结构化助手。下面是一段从持仓截图识别出来的原始文本，请尽可能提取真实持仓行。
+async function structurePortfolioText(rawText, heuristicRows) {
+  if (!DASHSCOPE_API_KEY) {
+    return {
+      rows: heuristicRows,
+      usedModel: false,
+    };
+  }
 
+  try {
+    const prompt = `
+你是一个中文券商持仓 OCR 文本结构化助手。下面是一段从持仓截图识别出来的原始文本，请尽可能提取真实持仓行。
 只返回 JSON，不要解释。JSON 结构必须是：
 {
   "rows": [
     {
       "id": "row-1",
       "name": "证券名称，可带代码",
-      "quantity": "股数或份额数字",
+      "quantity": "数量或份额数字",
       "marketValue": "市值数字",
       "pnlPercent": "盈亏比例数字，可带负号，不带%",
       "costPrice": "成本价数字",
@@ -140,56 +148,64 @@ async function structurePortfolioText(rawText) {
 
 规则：
 1. 只保留能从 OCR 文本中判断出的真实持仓，不要编造。
-2. 如果股数无法确认，优先尝试从“持仓/可用/数量/份额”附近抽取数字；实在不确定时填空字符串。
+2. 如果数量无法确认，优先尝试从“持仓/可用/数量/份额”附近抽取数字；实在不确定时填空字符串。
 3. 如果字段不确定，填空字符串。
-4. confidence 范围为 0 到 1。
+4. confidence 范围在 0 到 1。
+5. 输出尽量覆盖所有识别到的持仓行。
 
 OCR 原文如下：
 ${rawText}
 `;
 
-  const response = await fetch(`${DASHSCOPE_BASE_URL.replace(/\/$/, '')}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${DASHSCOPE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: DASHSCOPE_TEXT_MODEL,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.1,
-    }),
-  });
+    const response = await fetch(`${DASHSCOPE_BASE_URL.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${DASHSCOPE_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: DASHSCOPE_TEXT_MODEL,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.1,
+      }),
+    });
 
-  const responseText = await response.text();
-  if (!response.ok) {
-    throw new Error(`DashScope request failed: ${responseText}`);
+    const responseText = await response.text();
+    if (!response.ok) {
+      throw new Error(`DashScope request failed: ${responseText}`);
+    }
+
+    const payload = JSON.parse(responseText);
+    const text = extractMessageText(payload);
+    const parsed = extractJsonObject(text);
+    const modelRows = Array.isArray(parsed.rows)
+      ? parsed.rows.map((row, index) => ({
+          id: row.id || `row-${index + 1}`,
+          name: stringify(row.name),
+          quantity: stringify(row.quantity),
+          marketValue: stringify(row.marketValue),
+          pnlPercent: stringify(row.pnlPercent),
+          costPrice: stringify(row.costPrice),
+          currentPrice: stringify(row.currentPrice),
+          confidence: normalizeConfidence(row.confidence),
+        }))
+      : [];
+
+    return {
+      rows: mergeExtractedRows(modelRows, heuristicRows),
+      usedModel: true,
+    };
+  } catch {
+    return {
+      rows: heuristicRows,
+      usedModel: false,
+    };
   }
-
-  const payload = JSON.parse(responseText);
-  const text = extractMessageText(payload);
-  const parsed = extractJsonObject(text);
-
-  if (!Array.isArray(parsed.rows)) {
-    throw new Error('DashScope returned an unexpected response structure');
-  }
-
-  return parsed.rows.map((row, index) => ({
-    id: row.id || `row-${index + 1}`,
-    name: stringify(row.name),
-    quantity: stringify(row.quantity),
-    marketValue: stringify(row.marketValue),
-    pnlPercent: stringify(row.pnlPercent),
-    costPrice: stringify(row.costPrice),
-    currentPrice: stringify(row.currentPrice),
-    confidence: normalizeConfidence(row.confidence),
-  }));
 }
 
 async function suggestLineup(players) {
   const prompt = `
 你是一个把股票和 ETF 组合映射成足球阵容的助手。
-
 请基于输入持仓返回 JSON，结构必须是：
 {
   "formationName": "4-3-3",
@@ -243,6 +259,110 @@ ${JSON.stringify(players)}
         }))
       : [],
   };
+}
+
+function extractPortfolioRowsHeuristically(rawText) {
+  const lines = rawText
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
+  const candidates = [];
+
+  for (const line of lines) {
+    const nameMatch = line.match(/([A-Za-z\u4e00-\u9fa5]+(?:ETF|etf|LOF|lof)?(?:\d{6})?)/);
+    const numericTokens = line.match(/-?\d[\d,.]*(?:\.\d+)?%?/g) ?? [];
+
+    if (!nameMatch || numericTokens.length < 3) {
+      continue;
+    }
+
+    const name = nameMatch[1];
+    const percentToken =
+      numericTokens.find((token) => token.includes('%')) ??
+      numericTokens.find((token) => token.startsWith('-') || token.startsWith('+')) ??
+      '';
+    const plainTokens = numericTokens.filter((token) => token !== percentToken);
+    const priceTokens = plainTokens.filter((token) => token.includes('.'));
+    const integerTokens = plainTokens.filter((token) => !token.includes('.'));
+    const marketValue = pickLargestNumericToken(plainTokens);
+    const quantity =
+      integerTokens.find((token) => normalizeNumber(token) !== normalizeNumber(marketValue)) ?? '';
+    const currentPrice = priceTokens.at(-1) ?? '';
+    const costPrice = priceTokens.at(-2) ?? currentPrice ?? '';
+
+    candidates.push({
+      id: `heuristic-${candidates.length + 1}`,
+      name,
+      quantity: sanitizeToken(quantity),
+      marketValue: sanitizeToken(marketValue),
+      pnlPercent: sanitizeToken(percentToken).replace('%', ''),
+      costPrice: sanitizeToken(costPrice),
+      currentPrice: sanitizeToken(currentPrice),
+      confidence: numericTokens.length >= 5 ? 0.86 : 0.72,
+    });
+  }
+
+  return dedupeRows(candidates);
+}
+
+function mergeExtractedRows(modelRows, heuristicRows) {
+  if (!modelRows.length) {
+    return heuristicRows;
+  }
+
+  const merged = modelRows.map((row, index) => {
+    const fallback = heuristicRows[index];
+    return {
+      id: row.id || fallback?.id || `row-${index + 1}`,
+      name: row.name || fallback?.name || '',
+      quantity: row.quantity || fallback?.quantity || '',
+      marketValue: row.marketValue || fallback?.marketValue || '',
+      pnlPercent: row.pnlPercent || fallback?.pnlPercent || '',
+      costPrice: row.costPrice || fallback?.costPrice || '',
+      currentPrice: row.currentPrice || fallback?.currentPrice || '',
+      confidence: normalizeConfidence(
+        row.confidence || fallback?.confidence || 0.7,
+      ),
+    };
+  });
+
+  if (heuristicRows.length > merged.length) {
+    merged.push(...heuristicRows.slice(merged.length));
+  }
+
+  return dedupeRows(merged);
+}
+
+function dedupeRows(rows) {
+  const seen = new Set();
+  return rows.filter((row) => {
+    const key = `${normalizeName(row.name)}|${sanitizeToken(row.marketValue)}|${sanitizeToken(row.quantity)}`;
+    if (!row.name || seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function buildExtractionWarnings(rows, usedModel, heuristicCount) {
+  const warnings = [];
+
+  if (!usedModel) {
+    warnings.push('本次结构化未使用大模型结果，当前采用本地规则兜底，请重点核对字段。');
+  }
+
+  if (heuristicCount === 0 || rows.length === 0) {
+    warnings.push('未可靠识别到完整持仓行，建议换一张更清晰、包含完整表格的截图。');
+  }
+
+  const lowConfidenceCount = rows.filter((row) => row.confidence < 0.88).length;
+  if (lowConfidenceCount > 0) {
+    warnings.push(`有 ${lowConfidenceCount} 行置信度偏低，建议优先检查名称、数量和价格。`);
+  }
+
+  return warnings;
 }
 
 async function buildWeeklyPerformance(players) {
@@ -403,6 +523,34 @@ function extractJsonObject(text) {
   }
 
   return JSON.parse(cleaned.slice(start, end + 1));
+}
+
+function pickLargestNumericToken(tokens) {
+  let best = '';
+  let bestValue = -1;
+
+  for (const token of tokens) {
+    const value = normalizeNumber(token);
+    if (value > bestValue) {
+      best = token;
+      bestValue = value;
+    }
+  }
+
+  return best;
+}
+
+function sanitizeToken(value) {
+  return stringify(value).replace(/,/g, '');
+}
+
+function normalizeNumber(value) {
+  const parsed = Number(sanitizeToken(value).replace('%', ''));
+  return Number.isFinite(parsed) ? Math.abs(parsed) : 0;
+}
+
+function normalizeName(value) {
+  return stringify(value).replace(/\s+/g, '').toLowerCase();
 }
 
 function stringify(value) {
