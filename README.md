@@ -2,54 +2,90 @@
 
 把券商持仓做成足球阵容与球星卡的移动端应用。
 
-## 当前阶段
+## 当前状态
 
-当前仓库已经进入可持续开发状态：
+项目已经可以继续开发和跨电脑接力：
 
-- 使用 `Expo + React Native + TypeScript`
-- Git 仓库已初始化，可继续推送到远程仓库
-- 第一版前端骨架已包含
-  - 阵容主页
-  - 球场布局
-  - 球星卡详情
-  - AI 排阵规则占位
-  - 手动拖拽换位
-  - 截图导入与 OCR 确认页
+- 前端：`Expo + React Native + TypeScript`
+- 后端：本地 Node API，负责 OCR、AI 排阵和延迟行情聚合
+- Git 仓库已推送到远程
+- 当前远程地址：`ssh://git@ssh.github.com:443/r1chingliu/DP.git`
 
-## 本地运行
+## 快速开始
+
+先安装依赖：
 
 ```powershell
 npm.cmd install
-npm.cmd run start
 ```
 
-如果你用手机预览，安装 Expo Go 后扫描二维码即可。
-
-后端 OCR 服务启动：
+再启动后端：
 
 ```powershell
 npm.cmd run backend:start
 ```
 
-如果前端运行在浏览器，本地后端默认地址是 `http://127.0.0.1:8000`。
+最后启动前端：
 
-## 当前目录结构
-
-```text
-backend/        本地 OCR/API 服务
-src/
-  components/   UI 组件
-  data/         模拟持仓数据
-  lib/          排阵规则与状态处理
-  services/     前端调用的接口层
-  types/        核心类型定义
+```powershell
+npm.cmd run start
 ```
 
-## 后续开发方向
+浏览器预览可用：
 
-- OCR：继续优化真实券商持仓截图识别效果
-- AI：根据持仓结构推荐阵型、位置与角色文案
-- 行情：延迟行情刷新
-- 历史：持仓快照与阵容回看
+```powershell
+npx.cmd expo start --web --port 8083
+```
 
-详细方案见 [docs/ARCHITECTURE.md](/D:/Codex/docs/ARCHITECTURE.md)。
+## 环境变量
+
+复制 `.env.example` 为 `.env.local`，并填入可用配置：
+
+```env
+EXPO_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
+DASHSCOPE_BASE_URL=https://coding.dashscope.aliyuncs.com/v1
+DASHSCOPE_API_KEY=your-api-key
+DASHSCOPE_TEXT_MODEL=qwen3-coder-plus
+```
+
+说明：
+
+- `.env.local` 不应提交到 Git
+- 没有 `DASHSCOPE_API_KEY` 时，AI 排阵不可用
+- OCR 仍可走本地规则兜底，但识别质量会下降
+
+## 目录结构
+
+```text
+backend/        本地 OCR / AI / 行情 API
+docs/           架构和迁移文档
+src/
+  components/   UI 组件
+  data/         模拟数据
+  lib/          阵容规则、持仓转换、游戏化逻辑
+  services/     前端 API 调用
+  types/        核心类型
+```
+
+## 另一台电脑接手
+
+详细步骤见 [docs/HANDOFF.md](/D:/Codex/docs/HANDOFF.md)。
+
+## 当前已完成
+
+- 阵容首页
+- 球场布局
+- 球星卡详情
+- 长按拖拽换位原型
+- AI 排阵接口接入
+- OCR 导入确认页
+- OCR 本地规则兜底
+- 周度走势接口
+
+## 后续优先级
+
+- 提升券商截图 OCR 准确率
+- 优化拖拽手势流畅度
+- 增强 OCR 字段纠错规则
+- 加入历史快照与阵容回看
+- 补充真实行情刷新策略
